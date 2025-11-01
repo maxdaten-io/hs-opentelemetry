@@ -1,6 +1,8 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NumericUnderscores #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -----------------------------------------------------------------------------
@@ -69,32 +71,32 @@ module OpenTelemetry.Metrics.Core (
   -- * Synchronous Instruments
 
   -- ** Counter
-  Counter (..),
+  Counter,
   createCounter,
   counterAdd,
 
   -- ** UpDownCounter
-  UpDownCounter (..),
+  UpDownCounter,
   createUpDownCounter,
   upDownCounterAdd,
 
   -- ** Histogram
-  Histogram (..),
+  Histogram,
   createHistogram,
   histogramRecord,
 
   -- * Asynchronous Instruments
 
   -- ** Gauge
-  Gauge (..),
+  Gauge,
   createGauge,
 
   -- ** ObservableCounter
-  ObservableCounter (..),
+  ObservableCounter,
   createObservableCounter,
 
   -- ** ObservableUpDownCounter
-  ObservableUpDownCounter (..),
+  ObservableUpDownCounter,
   createObservableUpDownCounter,
 
   -- * Metric Data Types
@@ -128,8 +130,7 @@ import System.Clock
 import System.IO.Unsafe
 
 
-{- | Options for creating a 'MeterProvider'.
--}
+-- | Options for creating a 'MeterProvider'.
 data MeterProviderOptions = MeterProviderOptions
   { meterProviderOptionsResources :: MaterializedResources
   , meterProviderOptionsAttributeLimits :: AttributeLimits
@@ -290,7 +291,7 @@ createCounter m name desc unit = liftIO $ do
       , counterDescription = desc
       , counterUnit = unit
       , counterMeter = m
-      , counterAdd = \_ _ -> pure () -- No-op implementation for API
+      , counterAddImpl = \_ _ -> pure () -- No-op implementation for API
       }
 
 
@@ -309,7 +310,7 @@ counterAdd
   -> AttributeMap
   -- ^ Attributes to associate with this measurement
   -> m ()
-counterAdd c value attrs = liftIO $ counterAdd c value attrs
+counterAdd Counter {counterAddImpl = addImpl} value attrs = liftIO $ addImpl value attrs
 
 
 {- | Create an UpDownCounter instrument.
@@ -341,7 +342,7 @@ createUpDownCounter m name desc unit = liftIO $ do
       , upDownCounterDescription = desc
       , upDownCounterUnit = unit
       , upDownCounterMeter = m
-      , upDownCounterAdd = \_ _ -> pure () -- No-op implementation for API
+      , upDownCounterAddImpl = \_ _ -> pure () -- No-op implementation for API
       }
 
 
@@ -359,7 +360,7 @@ upDownCounterAdd
   -> AttributeMap
   -- ^ Attributes to associate with this measurement
   -> m ()
-upDownCounterAdd c value attrs = liftIO $ OpenTelemetry.Internal.Metrics.Types.upDownCounterAdd c value attrs
+upDownCounterAdd UpDownCounter {upDownCounterAddImpl = addImpl} value attrs = liftIO $ addImpl value attrs
 
 
 {- | Create a Histogram instrument.
@@ -391,7 +392,7 @@ createHistogram m name desc unit = liftIO $ do
       , histogramDescription = desc
       , histogramUnit = unit
       , histogramMeter = m
-      , histogramRecord = \_ _ -> pure () -- No-op implementation for API
+      , histogramRecordImpl = \_ _ -> pure () -- No-op implementation for API
       }
 
 
@@ -407,7 +408,7 @@ histogramRecord
   -> AttributeMap
   -- ^ Attributes to associate with this measurement
   -> m ()
-histogramRecord h value attrs = liftIO $ OpenTelemetry.Internal.Metrics.Types.histogramRecord h value attrs
+histogramRecord Histogram {histogramRecordImpl = recordImpl} value attrs = liftIO $ recordImpl value attrs
 
 
 {- | Create a Gauge instrument.

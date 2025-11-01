@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StrictData #-}
@@ -119,7 +120,7 @@ data Counter a = Counter
   , counterDescription :: !Text
   , counterUnit :: !Text
   , counterMeter :: !Meter
-  , counterAdd :: !a -> AttributeMap -> IO ()
+  , counterAddImpl :: a -> AttributeMap -> IO ()
   -- ^ Add a value to the counter with the given attributes
   }
 
@@ -133,7 +134,7 @@ data UpDownCounter a = UpDownCounter
   , upDownCounterDescription :: !Text
   , upDownCounterUnit :: !Text
   , upDownCounterMeter :: !Meter
-  , upDownCounterAdd :: !a -> AttributeMap -> IO ()
+  , upDownCounterAddImpl :: a -> AttributeMap -> IO ()
   -- ^ Add a value (positive or negative) to the counter with the given attributes
   }
 
@@ -147,7 +148,7 @@ data Histogram a = Histogram
   , histogramDescription :: !Text
   , histogramUnit :: !Text
   , histogramMeter :: !Meter
-  , histogramRecord :: !a -> AttributeMap -> IO ()
+  , histogramRecordImpl :: a -> AttributeMap -> IO ()
   -- ^ Record a value in the histogram with the given attributes
   }
 
@@ -194,8 +195,7 @@ data ObservableUpDownCounter a = ObservableUpDownCounter
   }
 
 
-{- | Represents a single metric data point with its attributes and value.
--}
+-- | Represents a single metric data point with its attributes and value.
 data DataPoint a = DataPoint
   { dataPointAttributes :: !Attributes
   , dataPointTimestamp :: !Timestamp
@@ -204,8 +204,7 @@ data DataPoint a = DataPoint
   deriving (Show, Eq, Generic)
 
 
-{- | Aggregated metric data for a single instrument.
--}
+-- | Aggregated metric data for a single instrument.
 data MetricData
   = SumData
       { sumName :: !Text
@@ -231,8 +230,7 @@ data MetricData
   deriving (Show, Eq, Generic)
 
 
-{- | A histogram data point with bucket counts.
--}
+-- | A histogram data point with bucket counts.
 data HistogramDataPoint = HistogramDataPoint
   { histogramDataPointAttributes :: !Attributes
   , histogramDataPointTimestamp :: !Timestamp
@@ -246,8 +244,7 @@ data HistogramDataPoint = HistogramDataPoint
   deriving (Show, Eq, Generic)
 
 
-{- | Metrics grouped by instrumentation scope (library).
--}
+-- | Metrics grouped by instrumentation scope (library).
 data ScopeMetrics = ScopeMetrics
   { scopeMetricsScope :: !InstrumentationLibrary
   , scopeMetricsMetrics :: !(Vector MetricData)
