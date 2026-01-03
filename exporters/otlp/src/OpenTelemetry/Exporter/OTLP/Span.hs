@@ -213,6 +213,16 @@ httpTracesResponseTimeout conf = case otlpTracesTimeout conf <|> otlpTimeout con
 -- Convert from `hs-opentelemetry-api` data model into OTLP Protobuf.
 --------------------------------------------------------------------------------
 
+makeResourceProto :: MaterializedResources -> Resource
+makeResourceProto r =
+  defMessage
+    & Resource_Fields.vec'attributes
+      .~ attributesToProto (getMaterializedResourcesAttributes r)
+    -- TODO
+    & Resource_Fields.droppedAttributesCount
+      .~ 0
+
+
 {- |
 Translate a collection of `OT.ImmutableSpan` spans to an OTLP `ExportTraceServiceRequest`.
 -}
@@ -224,14 +234,7 @@ immutableSpansToProtobuf completedSpans = do
       & Trace_Fields.vec'resourceSpans
         .~ Vector.singleton
           ( defMessage
-              & Trace_Fields.resource
-                .~ ( defMessage
-                      & Trace_Fields.vec'attributes
-                        .~ attributesToProto (getMaterializedResourcesAttributes someResourceGroup)
-                      -- TODO
-                      & Trace_Fields.droppedAttributesCount
-                        .~ 0
-                   )
+              & Trace_Fields.resource .~ makeResourceProto someResourceGroup
               -- TODO, seems like spans need to be emitted via an API
               -- that lets us keep them grouped by instrumentation originator
               & Trace_Fields.scopeSpans
@@ -383,8 +386,7 @@ attributesToProto =
   V.fromList
     . fmap attributeToKeyValue
     . H.toList
-    . snd
-    . ((,) <$> getCount <*> getAttributeMap)
+    . getAttributeMap
   where
     primAttributeToAnyValue = \case
       TextAttribute t -> defMessage & Common_Fields.stringValue .~ t

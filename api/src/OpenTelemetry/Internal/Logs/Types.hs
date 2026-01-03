@@ -1,27 +1,6 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
-module OpenTelemetry.Internal.Logs.Types (
-  LogRecordExporter,
-  LogRecordExporterArguments (..),
-  mkLogRecordExporter,
-  logRecordExporterExport,
-  logRecordExporterForceFlush,
-  logRecordExporterShutdown,
-  LogRecordProcessor (..),
-  LoggerProvider (..),
-  Logger (..),
-  ReadWriteLogRecord,
-  mkReadWriteLogRecord,
-  ReadableLogRecord,
-  mkReadableLogRecord,
-  IsReadableLogRecord (..),
-  IsReadWriteLogRecord (..),
-  ImmutableLogRecord (..),
-  LogRecordArguments (..),
-  emptyLogRecordArguments,
-  SeverityNumber (..),
-  toShortName,
-) where
+module OpenTelemetry.Internal.Logs.Types where
 
 import Control.Concurrent (MVar, newMVar, withMVar)
 import Control.Concurrent.Async
