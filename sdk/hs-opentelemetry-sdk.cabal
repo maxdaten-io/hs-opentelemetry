@@ -29,6 +29,7 @@ source-repository head
 
 library
   exposed-modules:
+      OpenTelemetry.Environment.Detect
       OpenTelemetry.Processor.Batch
       OpenTelemetry.Processor.Batch.LogRecord
       OpenTelemetry.Processor.Batch.Span
