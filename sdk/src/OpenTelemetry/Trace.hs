@@ -152,19 +152,14 @@ module OpenTelemetry.Trace (
   ImmutableSpan (..),
 ) where
 
-import qualified Data.ByteString.Char8 as B
 import Data.Either (partitionEithers)
-import qualified Data.HashMap.Strict as H
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
-import Data.Text.Encoding (decodeUtf8)
 import Network.HTTP.Types.Header
-import OpenTelemetry.Attributes (AttributeLimits (..), defaultAttributeLimits)
-import OpenTelemetry.Baggage (decodeBaggageHeader)
-import qualified OpenTelemetry.Baggage as Baggage
 import OpenTelemetry.Context (Context)
 import OpenTelemetry.Environment
 import OpenTelemetry.Exporter.OTLP.Span (loadExporterEnvironmentVariables, otlpExporter)
+import OpenTelemetry.Environment.Detect
 import OpenTelemetry.Exporter.Span (SpanExporter)
 import OpenTelemetry.Processor.Batch.Span (batchProcessor)
 import OpenTelemetry.Processor.Batch.TimeoutConfig (BatchTimeoutConfig (..), batchTimeoutConfig)
@@ -442,13 +437,6 @@ detectBatchProcessorConfig =
     <*> readEnvDefault "OTEL_BSP_MAX_EXPORT_BATCH_SIZE" (maxExportBatchSize batchTimeoutConfig)
 
 
-detectAttributeLimits :: IO AttributeLimits
-detectAttributeLimits =
-  AttributeLimits
-    <$> readEnvDefault "OTEL_ATTRIBUTE_COUNT_LIMIT" (attributeCountLimit defaultAttributeLimits)
-    <*> ((>>= readMaybe) <$> lookupEnv "OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT")
-
-
 detectSpanLimits :: IO SpanLimits
 detectSpanLimits =
   SpanLimits
@@ -489,31 +477,6 @@ detectExporters = do
 
 -- -- detectMetricsExporterSelection :: _
 -- -- TODO other metrics stuff
-
-detectResourceAttributes :: IO [(T.Text, Attribute)]
-detectResourceAttributes = do
-  mEnv <- lookupEnv "OTEL_RESOURCE_ATTRIBUTES"
-  case mEnv of
-    Nothing -> pure []
-    Just envVar -> case decodeBaggageHeader $ B.pack envVar of
-      Left err -> do
-        -- TODO logError
-        putStrLn err
-        pure []
-      Right ok ->
-        pure $
-          map (\(k, v) -> (decodeUtf8 $ Baggage.tokenValue k, toAttribute $ Baggage.value v)) $
-            H.toList $
-              Baggage.values ok
-
-
-readEnvDefault :: forall a. (Read a) => String -> a -> IO a
-readEnvDefault k defaultValue =
-  fromMaybe defaultValue . (>>= readMaybe) <$> lookupEnv k
-
-
-readEnv :: forall a. (Read a) => String -> IO (Maybe a)
-readEnv k = (>>= readMaybe) <$> lookupEnv k
 
 
 {- | Use all built-in resource detectors to populate resource information.
