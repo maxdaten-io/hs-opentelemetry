@@ -135,7 +135,6 @@ module OpenTelemetry.Trace (
   createTracerProvider,
   TracerProviderOptions (..),
   emptyTracerProviderOptions,
-  detectBuiltInResources,
   detectSampler,
   createSpan,
   createSpanWithoutCallStack,
@@ -170,11 +169,7 @@ import OpenTelemetry.Propagator.Datadog (datadogTraceContextPropagator)
 import OpenTelemetry.Propagator.W3CBaggage (w3cBaggagePropagator)
 import OpenTelemetry.Propagator.W3CTraceContext (w3cTraceContextPropagator)
 import OpenTelemetry.Resource
-import OpenTelemetry.Resource.Host.Detector (detectHost)
-import OpenTelemetry.Resource.OperatingSystem.Detector (detectOperatingSystem)
-import OpenTelemetry.Resource.Process.Detector (detectProcess, detectProcessRuntime)
-import OpenTelemetry.Resource.Service.Detector (detectService)
-import OpenTelemetry.Resource.Telemetry.Detector (detectTelemetry)
+import OpenTelemetry.Resource.Detector (detectBuiltInResources)
 import OpenTelemetry.Trace.Core
 import OpenTelemetry.Trace.Id.Generator.Default (defaultIdGenerator)
 import OpenTelemetry.Trace.Sampler (Sampler, alwaysOff, alwaysOn, parentBased, parentBasedOptions, traceIdRatioBased)
@@ -477,34 +472,3 @@ detectExporters = do
 
 -- -- detectMetricsExporterSelection :: _
 -- -- TODO other metrics stuff
-
-
-{- | Use all built-in resource detectors to populate resource information.
-
- Currently used detectors include:
-
- - 'detectService'
- - 'detectProcess'
- - 'detectOperatingSystem'
- - 'detectHost'
- - 'detectTelemetry'
- - 'detectProcessRuntime'
-
- This list will grow in the future as more detectors are implemented.
-
- @since 0.0.1.0
--}
-detectBuiltInResources :: IO (Resource 'Nothing)
-detectBuiltInResources = do
-  svc <- detectService
-  processInfo <- detectProcess
-  osInfo <- detectOperatingSystem
-  host <- detectHost
-  let rs =
-        toResource svc
-          `mergeResources` toResource detectTelemetry
-          `mergeResources` toResource detectProcessRuntime
-          `mergeResources` toResource processInfo
-          `mergeResources` toResource osInfo
-          `mergeResources` toResource host
-  pure rs
