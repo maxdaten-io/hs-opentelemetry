@@ -37,6 +37,7 @@ library
       OpenTelemetry.Processor.Simple
       OpenTelemetry.Processor.Simple.LogRecord
       OpenTelemetry.Processor.Simple.Span
+      OpenTelemetry.Resource.Detector
       OpenTelemetry.Resource.Host.Detector
       OpenTelemetry.Resource.OperatingSystem.Detector
       OpenTelemetry.Resource.Process.Detector
