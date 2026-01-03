@@ -4,7 +4,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeOperators #-}
 
 -----------------------------------------------------------------------------
 
@@ -157,8 +156,9 @@ import qualified Data.Text as T
 import Network.HTTP.Types.Header
 import OpenTelemetry.Context (Context)
 import OpenTelemetry.Environment
-import OpenTelemetry.Exporter.OTLP.Span (loadExporterEnvironmentVariables, otlpExporter)
 import OpenTelemetry.Environment.Detect
+import OpenTelemetry.Exporter.OTLP.Config (loadExporterEnvironmentVariables)
+import OpenTelemetry.Exporter.OTLP.Span (otlpExporter)
 import OpenTelemetry.Exporter.Span (SpanExporter)
 import OpenTelemetry.Processor.Batch.Span (batchProcessor)
 import OpenTelemetry.Processor.Batch.TimeoutConfig (BatchTimeoutConfig (..), batchTimeoutConfig)
@@ -349,11 +349,7 @@ getTracerProviderInitializationOptions' rs = do
       let
         -- NB: Resource merge prioritizes the left value on attribute key conflict.
         allRs = mergeResources rs (envVarRs <> builtInRs)
-      processors <- case exporters of
-        [] -> do
-          pure []
-        e : _ -> do
-          pure <$> batchProcessor processorConf e
+      processors <- mapM (batchProcessor processorConf) exporters
       let providerOpts =
             emptyTracerProviderOptions
               { tracerProviderOptionsIdGenerator = defaultIdGenerator
@@ -445,12 +441,7 @@ detectSpanLimits =
 
 knownExporters :: [(T.Text, IO SpanExporter)]
 knownExporters =
-  [
-    ( "otlp"
-    , do
-        otlpConfig <- loadExporterEnvironmentVariables
-        otlpExporter otlpConfig
-    )
+  [ ("otlp", otlpExporter =<< loadExporterEnvironmentVariables)
   , ("jaeger", error "Jaeger exporter not implemented")
   , ("zipkin", error "Zipkin exporter not implemented")
   ]
@@ -468,7 +459,6 @@ detectExporters = do
           (_notFound, exporterIntializers) = partitionEithers exportersAndRegistryEntry
       -- TODO, notFound logging
       sequence exporterIntializers
-
 
 -- -- detectMetricsExporterSelection :: _
 -- -- TODO other metrics stuff
