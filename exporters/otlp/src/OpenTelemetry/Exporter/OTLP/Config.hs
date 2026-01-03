@@ -30,27 +30,35 @@ data OTLPExporterConfig = OTLPExporterConfig
   { otlpEndpoint :: Maybe String
   , otlpTracesEndpoint :: Maybe String
   , otlpMetricsEndpoint :: Maybe String
+  , otlpLogsEndpoint :: Maybe String
   , otlpInsecure :: Bool
   , otlpSpanInsecure :: Bool
   , otlpMetricInsecure :: Bool
+  , otlpLogInsecure :: Bool
   , otlpCertificate :: Maybe FilePath
   , otlpTracesCertificate :: Maybe FilePath
   , otlpMetricsCertificate :: Maybe FilePath
+  , otlpLogsCertificate :: Maybe FilePath
   , otlpHeaders :: Maybe [Header]
   , otlpTracesHeaders :: Maybe [Header]
   , otlpMetricsHeaders :: Maybe [Header]
+  , otlpLogsHeaders :: Maybe [Header]
   , otlpCompression :: Maybe CompressionFormat
   , otlpTracesCompression :: Maybe CompressionFormat
   , otlpMetricsCompression :: Maybe CompressionFormat
+  , otlpLogsCompression :: Maybe CompressionFormat
   , otlpTimeout :: Maybe Int
   -- ^ Measured in milliseconds.
   , otlpTracesTimeout :: Maybe Int
   -- ^ Measured in milliseconds.
   , otlpMetricsTimeout :: Maybe Int
   -- ^ Measured in milliseconds.
+  , otlpLogsTimeout :: Maybe Int
+  -- ^ Measured in milliseconds.
   , otlpProtocol :: Maybe Protocol
   , otlpTracesProtocol :: Maybe Protocol
   , otlpMetricsProtocol :: Maybe Protocol
+  , otlpLogsProtocol :: Maybe Protocol
   }
 
 
@@ -60,24 +68,31 @@ loadExporterEnvironmentVariables = liftIO $ do
     <$> lookupEnv "OTEL_EXPORTER_OTLP_ENDPOINT"
     <*> lookupEnv "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
     <*> lookupEnv "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
+    <*> lookupEnv "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
     <*> lookupBooleanEnv "OTEL_EXPORTER_OTLP_INSECURE"
     <*> lookupBooleanEnv "OTEL_EXPORTER_OTLP_SPAN_INSECURE"
     <*> lookupBooleanEnv "OTEL_EXPORTER_OTLP_METRIC_INSECURE"
+    <*> lookupBooleanEnv "OTEL_EXPORTER_OTLP_LOG_INSECURE"
     <*> lookupEnv "OTEL_EXPORTER_OTLP_CERTIFICATE"
     <*> lookupEnv "OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE"
     <*> lookupEnv "OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE"
+    <*> lookupEnv "OTEL_EXPORTER_OTLP_LOGS_CERTIFICATE"
     <*> (fmap decodeHeaders <$> lookupEnv "OTEL_EXPORTER_OTLP_HEADERS")
     <*> (fmap decodeHeaders <$> lookupEnv "OTEL_EXPORTER_OTLP_TRACES_HEADERS")
     <*> (fmap decodeHeaders <$> lookupEnv "OTEL_EXPORTER_OTLP_METRICS_HEADERS")
+    <*> (fmap decodeHeaders <$> lookupEnv "OTEL_EXPORTER_OTLP_LOGS_HEADERS")
     <*> (traverse readCompressionFormat =<< lookupEnv "OTEL_EXPORTER_OTLP_COMPRESSION")
     <*> (traverse readCompressionFormat =<< lookupEnv "OTEL_EXPORTER_OTLP_TRACES_COMPRESSION")
     <*> (traverse readCompressionFormat =<< lookupEnv "OTEL_EXPORTER_OTLP_METRICS_COMPRESSION")
+    <*> (traverse readCompressionFormat =<< lookupEnv "OTEL_EXPORTER_OTLP_LOGS_COMPRESSION")
     <*> (traverse readTimeout =<< lookupEnv "OTEL_EXPORTER_OTLP_TIMEOUT")
     <*> (traverse readTimeout =<< lookupEnv "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT")
     <*> (traverse readTimeout =<< lookupEnv "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT")
+    <*> (traverse readTimeout =<< lookupEnv "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT")
     <*> (traverse readProtocol =<< lookupEnv "OTEL_EXPORTER_OTLP_PROTOCOL")
     <*> (traverse readProtocol =<< lookupEnv "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL")
     <*> (traverse readProtocol =<< lookupEnv "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL")
+    <*> (traverse readProtocol =<< lookupEnv "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL")
   where
     decodeHeaders hsString = case Baggage.decodeBaggageHeader $ ByteString.pack hsString of
       Left _ -> mempty
