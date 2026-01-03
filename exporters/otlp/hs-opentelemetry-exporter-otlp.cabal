@@ -28,6 +28,7 @@ source-repository head
 library
   exposed-modules:
       OpenTelemetry.Exporter.OTLP
+      OpenTelemetry.Exporter.OTLP.Config
       OpenTelemetry.Exporter.OTLP.LogRecord
       OpenTelemetry.Exporter.OTLP.Span
   other-modules:
