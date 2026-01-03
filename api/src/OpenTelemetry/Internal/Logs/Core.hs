@@ -187,6 +187,7 @@ createImmutableLogRecord attributeLimits LogRecordArguments {..} = do
       , logRecordTracingDetails
       , logRecordSeverityNumber = severityNumber
       , logRecordSeverityText = severityText <|> (toShortName =<< severityNumber)
+      , logRecordEventName = eventName
       , logRecordBody = body
       , logRecordAttributes
       }

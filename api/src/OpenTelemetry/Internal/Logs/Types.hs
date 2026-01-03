@@ -326,6 +326,9 @@ data ImmutableLogRecord = ImmutableLogRecord
   --
   -- In the contexts where severity participates in less-than / greater-than comparisons SeverityNumber field should be used.
   -- SeverityNumber can be compared to another SeverityNumber or to numbers in the 1..24 range (or to the corresponding short names).
+  , logRecordEventName :: Maybe Text
+  -- ^ A unique identifier of event category/type. All events with the same event_name are expected to conform to the same schema for both their attributes and their body.
+  -- Recommended to be fully qualified and short (no longer than 256 characters). Presence of event name on the log record identifies this record as an event.
   , logRecordBody :: AnyValue
   -- ^ A value containing the body of the log record. Can be for example a human-readable string message (including multi-line) describing the event in a free form or it can be a
   -- structured data composed of arrays and maps of other values. Body MUST support any type to preserve the semantics of structured logs emitted by the applications.
@@ -354,6 +357,7 @@ data LogRecordArguments = LogRecordArguments
   , context :: Maybe Context
   , severityText :: Maybe Text
   , severityNumber :: Maybe SeverityNumber
+  , eventName :: Maybe Text
   , body :: AnyValue
   , attributes :: HashMap Text AnyValue
   }
@@ -367,6 +371,7 @@ emptyLogRecordArguments =
     , context = Nothing
     , severityText = Nothing
     , severityNumber = Nothing
+    , eventName = Nothing
     , body = NullValue
     , attributes = H.empty
     }
