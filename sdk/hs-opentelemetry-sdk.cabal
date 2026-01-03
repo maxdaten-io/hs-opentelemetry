@@ -32,6 +32,7 @@ library
       OpenTelemetry.Processor.Batch
       OpenTelemetry.Processor.Batch.LogRecord
       OpenTelemetry.Processor.Batch.Span
+      OpenTelemetry.Processor.Batch.TimeoutConfig
       OpenTelemetry.Processor.Simple
       OpenTelemetry.Processor.Simple.LogRecord
       OpenTelemetry.Processor.Simple.Span
