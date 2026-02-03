@@ -60,7 +60,7 @@ getLoggerProviderInitializationOptions' rs = do
       processors <- mapM (batchProcessor processorConf) exporters
       let providerOpts =
             emptyLoggerProviderOptions
-              { loggerProviderOptionsResource = materializeResources allRs
+              { loggerProviderOptionsResources = materializeResources allRs
               , loggerProviderOptionsAttributeLimits = attrLimits
               }
       pure (processors, providerOpts)
