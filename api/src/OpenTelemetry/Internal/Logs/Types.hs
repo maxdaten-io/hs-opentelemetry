@@ -324,6 +324,7 @@ data ImmutableLogRecord = ImmutableLogRecord
   -- Can contain information about the request context (other than Trace Context Fields). The log attribute model MUST support any type, a superset of standard Attribute, to preserve the semantics of structured attributes
   -- emitted by the applications. This field is optional.
   }
+  deriving (Show, Eq)
 
 
 {- | Arguments that may be set on LogRecord creation. If observedTimestamp is not set, it will default to the current timestamp.
@@ -382,6 +383,7 @@ data SeverityNumber
   | Fatal3
   | Fatal4
   | Unknown !Int
+  deriving (Show)
 
 
 instance Enum SeverityNumber where
