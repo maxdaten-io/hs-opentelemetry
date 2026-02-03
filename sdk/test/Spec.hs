@@ -1,8 +1,8 @@
 import qualified OpenTelemetry.BaggageSpec as BaggageSpec
 import qualified OpenTelemetry.ContextSpec as ContextSpec
+import qualified OpenTelemetry.LogSpec as LogSpec
 import qualified OpenTelemetry.ResourceSpec as ResourceSpec
 import OpenTelemetry.Trace (initializeGlobalTracerProvider)
-import qualified OpenTelemetry.LogSpec as LogSpec
 import qualified OpenTelemetry.TraceSpec as TraceSpec
 import System.Environment (setEnv)
 import Test.Hspec
