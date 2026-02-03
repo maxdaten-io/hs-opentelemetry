@@ -1,25 +1,25 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 module OpenTelemetry.LogSpec (spec) where
 
-import Data.Functor (void)
 import Data.Foldable (traverse_)
+import Data.Functor (void)
 import Data.IORef
 import Data.Text (Text)
 import OpenTelemetry.Attributes (Attributes, lookupAttribute)
-import OpenTelemetry.Resource
-import OpenTelemetry.Trace
-import Test.Hspec
+import qualified OpenTelemetry.Exporter.InMemory.LogRecord as LogExporter
+import qualified OpenTelemetry.Exporter.InMemory.Span as SpanExporter
 import OpenTelemetry.Internal.Logs.Core
 import OpenTelemetry.Internal.Logs.Types
 import OpenTelemetry.Log
-import qualified OpenTelemetry.Exporter.InMemory.LogRecord as LogExporter
-import qualified OpenTelemetry.Exporter.InMemory.Span as SpanExporter
+import OpenTelemetry.Resource
+import OpenTelemetry.Trace
+import Test.Hspec
 
 
 pattern HostName :: Text
@@ -106,5 +106,5 @@ spec = describe "Log" $ do
       emittedSpans <- readIORef spansRef
       length emittedSpans `shouldBe` 1
       let [emittedSpan] = emittedSpans
-          SpanContext{..} = spanContext emittedSpan
+          SpanContext {..} = spanContext emittedSpan
       logRecordTracingDetails emittedLog `shouldBe` Just (traceId, spanId, traceFlags)
