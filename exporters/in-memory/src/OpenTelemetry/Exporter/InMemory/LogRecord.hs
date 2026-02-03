@@ -8,9 +8,9 @@ import Control.Concurrent.Async
 import Control.Concurrent.Chan.Unagi
 import Control.Monad.IO.Class
 import Data.IORef
-import OpenTelemetry.Processor.LogRecord
-import OpenTelemetry.Logs.Core
 import OpenTelemetry.Internal.Logs.Types
+import OpenTelemetry.Logs.Core
+import OpenTelemetry.Processor.LogRecord
 
 
 {- | Access exported logs via a concurrently accessible channel that produces log records.

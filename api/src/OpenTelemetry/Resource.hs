@@ -162,7 +162,7 @@ class ToResource a where
 
 class MaterializeResource schema where
   -- | Convert resource fields into a version that discharges the schema from the
-  -- type level to the runtime level.
+  --   type level to the runtime level.
   materializeResources :: Resource schema -> MaterializedResources
 
 

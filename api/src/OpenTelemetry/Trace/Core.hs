@@ -79,7 +79,7 @@ module OpenTelemetry.Trace.Core (
   SpanContext (..),
   -- | W3c Trace flags
   --
-  -- https://www.w3.org/TR/trace-context/#trace-flags
+  --   https://www.w3.org/TR/trace-context/#trace-flags
   TraceFlags,
   traceFlagsValue,
   traceFlagsFromWord8,
@@ -203,18 +203,18 @@ createSpan
   :: (MonadIO m, HasCallStack)
   => Tracer
   -- ^ 'Tracer' to create the span from. Associated 'Processor's and 'Exporter's will be
-  -- used for the lifecycle of the created 'Span'
+  --   used for the lifecycle of the created 'Span'
   -> Context
   -- ^ Context, potentially containing a parent span. If no existing parent (or context) exists,
-  -- you can use 'OpenTelemetry.Context.empty'.
+  --   you can use 'OpenTelemetry.Context.empty'.
   -> Text
   -- ^ Span name
   -> SpanArguments
   -- ^ Additional span information
   -> m Span
   -- ^ The created span.
-  -- Try and infer source code information unless the user has set any of the attributes already, which
-  -- we take as an indication that our automatic strategy won't work well.
+  --   Try and infer source code information unless the user has set any of the attributes already, which
+  --   we take as an indication that our automatic strategy won't work well.
 createSpan t ctxt n args = createSpanWithoutCallStack t ctxt n (addAttributesToSpanArgumentsIfNonePresent callerAttributes args)
 
 
@@ -223,10 +223,10 @@ createSpanWithoutCallStack
   :: (MonadIO m)
   => Tracer
   -- ^ 'Tracer' to create the span from. Associated 'Processor's and 'Exporter's will be
-  -- used for the lifecycle of the created 'Span'
+  --   used for the lifecycle of the created 'Span'
   -> Context
   -- ^ Context, potentially containing a parent span. If no existing parent (or context) exists,
-  -- you can use 'OpenTelemetry.Context.empty'.
+  --   you can use 'OpenTelemetry.Context.empty'.
   -> Text
   -- ^ Span name
   -> SpanArguments
@@ -401,11 +401,11 @@ inSpan
   -- ^ The name of the span. This may be updated later via 'updateName'
   -> SpanArguments
   -- ^ Additional options for creating the span, such as 'SpanKind',
-  -- span links, starting attributes, etc.
+  --   span links, starting attributes, etc.
   -> m a
   -- ^ The action to perform. 'inSpan' will record the time spent on the
-  -- action without forcing strict evaluation of the result. Any uncaught
-  -- exceptions will be recorded and rethrown.
+  --   action without forcing strict evaluation of the result. Any uncaught
+  --   exceptions will be recorded and rethrown.
   -> m a
 -- Try and infer source code information unless the user has set any of the attributes already, which
 -- we take as an indication that our automatic strategy won't work well.
@@ -842,10 +842,10 @@ getTracerProviderPropagators = tracerProviderPropagators
 newtype TracerOptions = TracerOptions
   { tracerSchema :: Maybe Text
   -- ^ OpenTelemetry provides a schema for describing common attributes so that backends can easily parse and identify relevant information.
-  -- It is important to understand these conventions when writing instrumentation, in order to normalize your data and increase its utility.
+  --   It is important to understand these conventions when writing instrumentation, in order to normalize your data and increase its utility.
   --
-  -- In particular, this option is valuable to set when possible, because it allows vendors to normalize data accross releases in order to account
-  -- for attribute name changes.
+  --   In particular, this option is valuable to set when possible, because it allows vendors to normalize data accross releases in order to account
+  --   for attribute name changes.
   }
 
 
