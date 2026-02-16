@@ -124,7 +124,9 @@ test-suite hs-opentelemetry-sdk-test
   other-modules:
       OpenTelemetry.BaggageSpec
       OpenTelemetry.ContextSpec
+      OpenTelemetry.LogRecordProcessorSpec
       OpenTelemetry.LogSpec
+      OpenTelemetry.MetricsSpec
       OpenTelemetry.ResourceSpec
       OpenTelemetry.TraceSpec
       Paths_hs_opentelemetry_sdk
