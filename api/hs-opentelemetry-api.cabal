@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.37.0.
+-- This file has been generated from package.yaml by hpack version 0.38.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -77,8 +77,8 @@ library
       OpenTelemetry.Util
   other-modules:
       OpenTelemetry.Context.Types
-      OpenTelemetry.Internal.Metrics.Types
       OpenTelemetry.Internal.Trace.Types
+      OpenTelemetry.Internal.Metrics.Types
       Paths_hs_opentelemetry_api
   hs-source-dirs:
       src

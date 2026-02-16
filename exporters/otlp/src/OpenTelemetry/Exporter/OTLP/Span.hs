@@ -43,7 +43,6 @@ module OpenTelemetry.Exporter.OTLP.Span (
   otlpExporterGRpcEndpoint,
 ) where
 
-import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Exception (SomeAsyncException (..), SomeException (..), fromException, throwIO, try)
 import Control.Monad.IO.Class
@@ -101,12 +100,12 @@ httpOtlpExporter :: (MonadIO m) => OTLPExporterConfig -> m SpanExporter
 httpOtlpExporter conf = do
   -- TODO url parsing is jankym
   -- TODO make retryDelay and maximum retry counts configurable
-  req <- liftIO $ parseRequest (httpHost conf <> "/v1/traces")
-  let (encodingHeaders, encoder) = httpCompression conf
+  req <- liftIO $ parseRequest (otlpSignalEndpoint conf TracesSignal)
+  let (encodingHeaders, encoder) = httpCompressionForSignal conf TracesSignal
   let baseReq =
         req
           { method = "POST"
-          , requestHeaders = encodingHeaders <> httpBaseHeaders conf req
+          , requestHeaders = encodingHeaders <> httpBaseHeadersForSignal conf TracesSignal req
           , responseTimeout = httpTracesResponseTimeout conf
           }
   pure $
@@ -199,7 +198,7 @@ Internal helper.
 Get the HTTP `ResponseTimeout` from the `OTLPExporterConfig`.
 -}
 httpTracesResponseTimeout :: OTLPExporterConfig -> ResponseTimeout
-httpTracesResponseTimeout conf = case otlpTracesTimeout conf <|> otlpTimeout conf of
+httpTracesResponseTimeout conf = case otlpSignalTimeout conf TracesSignal of
   Just timeoutMilli
     | timeoutMilli == 0 -> responseTimeoutNone
     | timeoutMilli >= 1 -> responseTimeoutMilli timeoutMilli

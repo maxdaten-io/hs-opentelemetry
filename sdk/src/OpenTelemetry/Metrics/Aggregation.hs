@@ -49,15 +49,12 @@ module OpenTelemetry.Metrics.Aggregation (
 ) where
 
 import Control.Concurrent.STM
-import Control.Monad (forM)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
-import Data.IORef
 import Data.Text (Text)
 import qualified Data.Vector as V
-import OpenTelemetry.Attributes (Attributes, addAttributes, emptyAttributes)
-import OpenTelemetry.Common (Timestamp)
-import OpenTelemetry.Internal.Metrics.Types
+import OpenTelemetry.Attributes (Attributes)
+import OpenTelemetry.Metrics.Core
 
 
 {- | An Aggregation represents how measurements are combined into metrics.

@@ -1,6 +1,6 @@
 cabal-version: 1.22
 
--- This file has been generated from package.yaml by hpack version 0.37.0.
+-- This file has been generated from package.yaml by hpack version 0.38.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -124,7 +124,9 @@ test-suite hs-opentelemetry-sdk-test
   other-modules:
       OpenTelemetry.BaggageSpec
       OpenTelemetry.ContextSpec
+      OpenTelemetry.LogRecordProcessorSpec
       OpenTelemetry.LogSpec
+      OpenTelemetry.MetricsSpec
       OpenTelemetry.ResourceSpec
       OpenTelemetry.TraceSpec
       Paths_hs_opentelemetry_sdk
@@ -135,8 +137,8 @@ test-suite hs-opentelemetry-sdk-test
       base >=4.7 && <5
     , clock
     , hs-opentelemetry-api
-    , hs-opentelemetry-sdk
     , hs-opentelemetry-exporter-in-memory
+    , hs-opentelemetry-sdk
     , hspec
     , text
     , unordered-containers

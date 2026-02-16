@@ -7,7 +7,6 @@
 
 module OpenTelemetry.Exporter.OTLP.LogRecord where
 
-import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Exception (SomeAsyncException (..), SomeException (..), fromException, throwIO, try)
 import Control.Monad.IO.Class
@@ -67,12 +66,12 @@ httpOtlpExporter :: (MonadIO m) => OTLPExporterConfig -> m LogRecordExporter
 httpOtlpExporter conf = do
   -- TODO url parsing is jankym
   -- TODO make retryDelay and maximum retry counts configurable
-  req <- liftIO $ parseRequest (httpHost conf <> "/v1/logs")
-  let (encodingHeaders, encoder) = httpCompression conf
+  req <- liftIO $ parseRequest (otlpSignalEndpoint conf LogsSignal)
+  let (encodingHeaders, encoder) = httpCompressionForSignal conf LogsSignal
   let baseReq =
         req
           { method = "POST"
-          , requestHeaders = encodingHeaders <> httpBaseHeaders conf req
+          , requestHeaders = encodingHeaders <> httpBaseHeadersForSignal conf LogsSignal req
           , responseTimeout = httpLogsResponseTimeout conf
           }
   liftIO $
@@ -167,7 +166,7 @@ Internal helper.
 Get the HTTP `ResponseTimeout` from the `OTLPExporterConfig`.
 -}
 httpLogsResponseTimeout :: OTLPExporterConfig -> ResponseTimeout
-httpLogsResponseTimeout conf = case otlpLogsTimeout conf <|> otlpTimeout conf of
+httpLogsResponseTimeout conf = case otlpSignalTimeout conf LogsSignal of
   Just timeoutMilli
     | timeoutMilli == 0 -> responseTimeoutNone
     | timeoutMilli >= 1 -> responseTimeoutMilli timeoutMilli
