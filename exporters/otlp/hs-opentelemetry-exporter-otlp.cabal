@@ -30,6 +30,7 @@ library
       OpenTelemetry.Exporter.OTLP
       OpenTelemetry.Exporter.OTLP.Config
       OpenTelemetry.Exporter.OTLP.LogRecord
+      OpenTelemetry.Exporter.OTLP.Metric
       OpenTelemetry.Exporter.OTLP.Span
   other-modules:
       Paths_hs_opentelemetry_exporter_otlp
