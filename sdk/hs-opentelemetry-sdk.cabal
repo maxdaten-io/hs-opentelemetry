@@ -31,6 +31,9 @@ library
   exposed-modules:
       OpenTelemetry.Environment.Detect
       OpenTelemetry.Log
+      OpenTelemetry.Metrics
+      OpenTelemetry.Metrics.Aggregation
+      OpenTelemetry.Metrics.MetricReader
       OpenTelemetry.Processor.Batch
       OpenTelemetry.Processor.Batch.LogRecord
       OpenTelemetry.Processor.Batch.Span
@@ -55,6 +58,7 @@ library
     , OpenTelemetry.Context.ThreadLocal
     , OpenTelemetry.Exporter.Span
     , OpenTelemetry.Exporter.LogRecord
+    , OpenTelemetry.Exporter.Metric
     , OpenTelemetry.Exporter
     , OpenTelemetry.Processor.Span
     , OpenTelemetry.Processor.LogRecord
