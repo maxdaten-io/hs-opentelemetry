@@ -203,15 +203,45 @@ The type of `LazyByteString` encoders.
 type Encoder = LazyByteString -> LazyByteString
 
 
+data OTLPSignal
+  = TracesSignal
+  | MetricsSignal
+  | LogsSignal
+
+
+otlpSignalEndpoint :: OTLPExporterConfig -> OTLPSignal -> String
+otlpSignalEndpoint conf sig =
+  case sig of
+    TracesSignal ->
+      fromMaybe (httpHost conf <> "/v1/traces") (otlpTracesEndpoint conf)
+    MetricsSignal ->
+      fromMaybe (httpHost conf <> "/v1/metrics") (otlpMetricsEndpoint conf)
+    LogsSignal ->
+      fromMaybe (httpHost conf <> "/v1/logs") (otlpLogsEndpoint conf)
+
+
+otlpSignalTimeout :: OTLPExporterConfig -> OTLPSignal -> Maybe Int
+otlpSignalTimeout conf sig =
+  case sig of
+    TracesSignal -> otlpTracesTimeout conf <|> otlpTimeout conf
+    MetricsSignal -> otlpMetricsTimeout conf <|> otlpTimeout conf
+    LogsSignal -> otlpLogsTimeout conf <|> otlpTimeout conf
+
+
 {- |
 Internal helper.
 Get a function that adds the compression header to the HTTP headers and a function that performs the compression.
 -}
-httpCompression :: OTLPExporterConfig -> ([(HeaderName, ByteString)], Encoder)
-httpCompression conf =
-  case otlpTracesCompression conf <|> otlpCompression conf of
+httpCompressionForSignal :: OTLPExporterConfig -> OTLPSignal -> ([(HeaderName, ByteString)], Encoder)
+httpCompressionForSignal conf sig =
+  case signalCompression <|> otlpCompression conf of
     Just GZip -> ([(hContentEncoding, "gzip")], GZip.compress)
     _otherwise -> ([], id)
+  where
+    signalCompression = case sig of
+      TracesSignal -> otlpTracesCompression conf
+      MetricsSignal -> otlpMetricsCompression conf
+      LogsSignal -> otlpLogsCompression conf
 
 
 {- |
@@ -226,12 +256,17 @@ httpProtobufMimeType = "application/x-protobuf"
 Internal helper.
 Get the base HTTP headers for the request.
 -}
-httpBaseHeaders :: OTLPExporterConfig -> Request -> [(HeaderName, ByteString)]
-httpBaseHeaders conf req =
+httpBaseHeadersForSignal :: OTLPExporterConfig -> OTLPSignal -> Request -> [(HeaderName, ByteString)]
+httpBaseHeadersForSignal conf sig req =
   concat
     [ [(hContentType, httpProtobufMimeType)]
-    , [(hAcceptEncoding, httpProtobufMimeType)]
+    , [(hAccept, httpProtobufMimeType)]
     , fromMaybe [] (otlpHeaders conf)
-    , fromMaybe [] (otlpTracesHeaders conf)
+    , signalHeaders
     , requestHeaders req
     ]
+  where
+    signalHeaders = case sig of
+      TracesSignal -> fromMaybe [] (otlpTracesHeaders conf)
+      MetricsSignal -> fromMaybe [] (otlpMetricsHeaders conf)
+      LogsSignal -> fromMaybe [] (otlpLogsHeaders conf)

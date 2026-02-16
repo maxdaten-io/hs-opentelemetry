@@ -1,6 +1,6 @@
 cabal-version: 1.22
 
--- This file has been generated from package.yaml by hpack version 0.37.0.
+-- This file has been generated from package.yaml by hpack version 0.38.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -29,15 +29,19 @@ source-repository head
 
 library
   exposed-modules:
+      OpenTelemetry.Environment.Detect
+      OpenTelemetry.Log
       OpenTelemetry.Metrics
       OpenTelemetry.Metrics.Aggregation
       OpenTelemetry.Metrics.MetricReader
       OpenTelemetry.Processor.Batch
       OpenTelemetry.Processor.Batch.LogRecord
       OpenTelemetry.Processor.Batch.Span
+      OpenTelemetry.Processor.Batch.TimeoutConfig
       OpenTelemetry.Processor.Simple
       OpenTelemetry.Processor.Simple.LogRecord
       OpenTelemetry.Processor.Simple.Span
+      OpenTelemetry.Resource.Detector
       OpenTelemetry.Resource.Host.Detector
       OpenTelemetry.Resource.OperatingSystem.Detector
       OpenTelemetry.Resource.Process.Detector
@@ -120,6 +124,9 @@ test-suite hs-opentelemetry-sdk-test
   other-modules:
       OpenTelemetry.BaggageSpec
       OpenTelemetry.ContextSpec
+      OpenTelemetry.LogRecordProcessorSpec
+      OpenTelemetry.LogSpec
+      OpenTelemetry.MetricsSpec
       OpenTelemetry.ResourceSpec
       OpenTelemetry.TraceSpec
       Paths_hs_opentelemetry_sdk
@@ -130,6 +137,7 @@ test-suite hs-opentelemetry-sdk-test
       base >=4.7 && <5
     , clock
     , hs-opentelemetry-api
+    , hs-opentelemetry-exporter-in-memory
     , hs-opentelemetry-sdk
     , hspec
     , text
