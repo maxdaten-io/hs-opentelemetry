@@ -4,10 +4,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module OpenTelemetry.AllSignalsSnapshot (assertAllSignalsSnapshot) where
+module OpenTelemetry.AllSignalsSnapshot (allSignalsSnapshotGolden) where
 
-import Control.Exception (IOException, catch)
-import Data.Char (toLower)
 import Data.Foldable (toList)
 import qualified Data.HashMap.Strict as HashMap
 import Data.IORef
@@ -35,58 +33,14 @@ import OpenTelemetry.Resource (MaterializedResources, Resource, getMaterializedR
 import qualified OpenTelemetry.Trace as Trace
 import OpenTelemetry.Trace.Id (Base (..), SpanId, TraceId, spanIdBaseEncodedText, traceIdBaseEncodedText)
 import OpenTelemetry.Trace.Id.Generator.Default (defaultIdGenerator)
-import System.Environment (lookupEnv)
-import System.IO.Error (isDoesNotExistError)
-import Test.Hspec
+import Test.Hspec.Golden (Golden, defaultGolden)
 
 
 type MetricBatch = (MaterializedResources, [(MetricsCore.InstrumentationLibrary, [MetricsCore.MetricData])])
 
 
-snapshotPath :: FilePath
-snapshotPath = "test/snapshots/all-signals.snapshot"
-
-
-assertAllSignalsSnapshot :: IO ()
-assertAllSignalsSnapshot = do
-  snapshot <- produceSnapshot
-  updateSnapshots <- shouldUpdateSnapshots
-  if updateSnapshots
-    then writeFile snapshotPath snapshot
-    else pure ()
-  expected <- readSnapshotFile
-  snapshot `shouldBe` expected
-
-
-shouldUpdateSnapshots :: IO Bool
-shouldUpdateSnapshots = do
-  raw <- lookupEnv "UPDATE_SNAPSHOTS"
-  pure $ case fmap (fmap toLower) raw of
-    Just "1" -> True
-    Just "true" -> True
-    Just "yes" -> True
-    _ -> False
-
-
-readSnapshotFile :: IO String
-readSnapshotFile =
-  catch
-    (readFile snapshotPath)
-    (\err -> handleMissingSnapshot err)
-  where
-    handleMissingSnapshot :: IOException -> IO String
-    handleMissingSnapshot err
-      | isDoesNotExistError err =
-          expectationFailure
-            ( "Snapshot missing at "
-                ++ snapshotPath
-                ++ ". Run with UPDATE_SNAPSHOTS=1 to create it."
-                ++ " (fish: set -x UPDATE_SNAPSHOTS 1; cabal test hs-opentelemetry-sdk-test; set -e UPDATE_SNAPSHOTS)"
-            )
-            >> pure ""
-      | otherwise =
-          expectationFailure ("Failed to read snapshot: " ++ show err)
-            >> pure ""
+allSignalsSnapshotGolden :: IO (Golden String)
+allSignalsSnapshotGolden = defaultGolden "all-signals-snapshot" <$> produceSnapshot
 
 
 produceSnapshot :: IO String

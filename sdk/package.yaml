@@ -8,7 +8,7 @@ version:             0.1.0.1
 extra-source-files:
 - README.md
 - ChangeLog.md
-- test/snapshots/all-signals.snapshot
+- .golden/all-signals-snapshot/golden
 extra-doc-files:
 - docs/img/*
 
@@ -102,5 +102,6 @@ tests:
     - hs-opentelemetry-sdk
     - hs-opentelemetry-exporter-in-memory
     - hspec
+    - hspec-golden
     - text
     - unordered-containers
