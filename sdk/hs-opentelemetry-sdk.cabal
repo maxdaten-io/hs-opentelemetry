@@ -20,7 +20,7 @@ build-type:         Simple
 extra-source-files:
     README.md
     ChangeLog.md
-    test/snapshots/all-signals.snapshot
+    .golden/all-signals-snapshot/golden
 extra-doc-files:
     docs/img/traces_spans.png
 
