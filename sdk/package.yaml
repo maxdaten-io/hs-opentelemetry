@@ -8,6 +8,7 @@ version:             0.1.0.1
 extra-source-files:
 - README.md
 - ChangeLog.md
+- test/snapshots/all-signals.snapshot
 extra-doc-files:
 - docs/img/*
 
