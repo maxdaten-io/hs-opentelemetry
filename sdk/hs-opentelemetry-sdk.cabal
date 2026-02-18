@@ -20,6 +20,7 @@ build-type:         Simple
 extra-source-files:
     README.md
     ChangeLog.md
+    test/snapshots/all-signals.snapshot
 extra-doc-files:
     docs/img/traces_spans.png
 
@@ -122,6 +123,8 @@ test-suite hs-opentelemetry-sdk-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      OpenTelemetry.AllSignalsSnapshot
+      OpenTelemetry.AllSignalsSnapshotSpec
       OpenTelemetry.BaggageSpec
       OpenTelemetry.ContextSpec
       OpenTelemetry.LogRecordProcessorSpec

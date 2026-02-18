@@ -1,3 +1,4 @@
+import qualified OpenTelemetry.AllSignalsSnapshotSpec as AllSignalsSnapshotSpec
 import qualified OpenTelemetry.BaggageSpec as BaggageSpec
 import qualified OpenTelemetry.ContextSpec as ContextSpec
 import qualified OpenTelemetry.LogRecordProcessorSpec as LogRecordProcessorSpec
@@ -25,3 +26,4 @@ main = do
     LogRecordProcessorSpec.spec
     MetricsSpec.spec
     ResourceSpec.spec
+    AllSignalsSnapshotSpec.spec
