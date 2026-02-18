@@ -6,6 +6,12 @@ the hspec instrumentation.
 Note that this uses `cabal run`: `cabal test` doesn't allow owning the test
 entry point.
 
+### Run
+
+```sh
+cabal run hspec-example:test
+```
+
 Sample output:
 
 ```
