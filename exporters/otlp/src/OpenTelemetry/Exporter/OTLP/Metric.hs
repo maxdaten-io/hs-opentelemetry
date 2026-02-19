@@ -175,6 +175,8 @@ makeScopeMetrics scope metrics_ =
       .~ ( defMessage
             & Common_Fields.name .~ OT.libraryName scope
             & Common_Fields.version .~ OT.libraryVersion scope
+            & Common_Fields.vec'attributes .~ attributesToProto (OT.libraryAttributes scope)
+            & Common_Fields.droppedAttributesCount .~ fromIntegral (getDropped (OT.libraryAttributes scope))
          )
     & Metrics_Fields.schemaUrl .~ OT.librarySchemaUrl scope
     & Metrics_Fields.vec'metrics .~ fmap metricDataToProto metrics_

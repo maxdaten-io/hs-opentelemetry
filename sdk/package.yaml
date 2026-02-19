@@ -102,8 +102,10 @@ tests:
     - hs-opentelemetry-sdk
     - hs-opentelemetry-exporter-otlp
     - hs-opentelemetry-exporter-in-memory
+    - hs-opentelemetry-otlp
     - hspec
     - hspec-golden
+    - microlens
     - text
     - unordered-containers
     - vector

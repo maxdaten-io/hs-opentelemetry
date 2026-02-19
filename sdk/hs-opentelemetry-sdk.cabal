@@ -142,9 +142,11 @@ test-suite hs-opentelemetry-sdk-test
     , hs-opentelemetry-api
     , hs-opentelemetry-exporter-otlp
     , hs-opentelemetry-exporter-in-memory
+    , hs-opentelemetry-otlp
     , hs-opentelemetry-sdk
     , hspec
     , hspec-golden
+    , microlens
     , text
     , unordered-containers
     , vector
