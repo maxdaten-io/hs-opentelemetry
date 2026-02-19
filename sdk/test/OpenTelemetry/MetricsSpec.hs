@@ -14,6 +14,7 @@ import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Vector as Vector
+import Lens.Micro ((^.))
 import OpenTelemetry.Attributes
 import OpenTelemetry.Exporter.Metric
 import qualified OpenTelemetry.Exporter.OTLP.Config as OTLPConfig
@@ -29,6 +30,8 @@ import OpenTelemetry.Metrics.Core (
  )
 import OpenTelemetry.Metrics.MetricReader (PeriodicReaderConfig (..), manualReader, periodicReader)
 import OpenTelemetry.Resource
+import qualified Proto.Opentelemetry.Proto.Common.V1.Common_Fields as Common_Fields
+import qualified Proto.Opentelemetry.Proto.Metrics.V1.Metrics_Fields as Metrics_Fields
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.Timeout (timeout)
 import Test.Hspec
@@ -672,6 +675,20 @@ spec = describe "Metrics" $ do
         metricExporterTemporality exporter HistogramKind `shouldBe` DeltaTemporality
         metricExporterTemporality exporter ObservableCounterKind `shouldBe` CumulativeTemporality
         metricExporterTemporality exporter UpDownCounterKind `shouldBe` CumulativeTemporality
+
+    it "includes instrumentation scope attributes in OTLP scope metrics" $ do
+      let scopeAttrs = addAttribute defaultAttributeLimits emptyAttributes "scope.attribute" ("present" :: Text)
+          scope =
+            InstrumentationLibrary
+              { libraryName = "spec.metrics.temporality"
+              , libraryVersion = "1.0.0"
+              , librarySchemaUrl = "https://opentelemetry.io/schemas/1.0.0"
+              , libraryAttributes = scopeAttrs
+              }
+          scopeMetrics = OTLPMetric.makeScopeMetrics scope Vector.empty
+          exportedScope = scopeMetrics ^. Metrics_Fields.scope
+      exportedScope ^. Common_Fields.vec'attributes `shouldBe` OTLPMetric.attributesToProto scopeAttrs
+      exportedScope ^. Common_Fields.droppedAttributesCount `shouldBe` fromIntegral (getDropped scopeAttrs)
 
     it "applies periodic reader timeout to force flush exports" $ do
       let exporter =
