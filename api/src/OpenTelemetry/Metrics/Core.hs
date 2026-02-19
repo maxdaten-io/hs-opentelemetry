@@ -160,7 +160,14 @@ forceFlushMeterProvider MeterProvider {..} = liftIO $ do
 
 
 makeMeter :: MeterProvider -> InstrumentationLibrary -> MeterOptions -> Meter
-makeMeter provider lib _ = Meter {meterName = lib, meterProvider = provider}
+makeMeter provider lib MeterOptions {meterSchema} =
+  Meter
+    { meterName =
+        lib
+          { librarySchemaUrl = fromMaybe (librarySchemaUrl lib) meterSchema
+          }
+    , meterProvider = provider
+    }
 
 
 getMeter :: (MonadIO m) => MeterProvider -> InstrumentationLibrary -> MeterOptions -> m Meter
