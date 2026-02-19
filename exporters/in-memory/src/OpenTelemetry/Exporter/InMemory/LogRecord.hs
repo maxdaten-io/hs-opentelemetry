@@ -9,7 +9,6 @@ import Control.Concurrent.Chan.Unagi
 import Control.Monad.IO.Class
 import Data.IORef
 import OpenTelemetry.Internal.Logs.Types
-import OpenTelemetry.Logs.Core
 import OpenTelemetry.Processor.LogRecord
 
 
