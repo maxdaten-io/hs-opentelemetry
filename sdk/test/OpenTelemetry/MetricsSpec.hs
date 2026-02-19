@@ -912,6 +912,18 @@ spec = describe "Metrics" $ do
           (readers, _) <- getMeterProviderInitializationOptions
           length readers `shouldBe` 1
 
+    it "treats OTEL_METRICS_EXPORTER=none,otlp as disabled" $ do
+      withEnvVar "OTEL_SDK_DISABLED" Nothing $
+        withEnvVar "OTEL_METRICS_EXPORTER" (Just "none,otlp") $ do
+          (readers, _) <- getMeterProviderInitializationOptions
+          length readers `shouldBe` 0
+
+    it "treats OTEL_METRICS_EXPORTER=otlp,none as disabled" $ do
+      withEnvVar "OTEL_SDK_DISABLED" Nothing $
+        withEnvVar "OTEL_METRICS_EXPORTER" (Just "otlp,none") $ do
+          (readers, _) <- getMeterProviderInitializationOptions
+          length readers `shouldBe` 0
+
     it "ignores unknown OTEL_METRICS_EXPORTER values and falls back to default" $ do
       withEnvVar "OTEL_SDK_DISABLED" Nothing $
         withEnvVar "OTEL_METRICS_EXPORTER" (Just "does-not-exist") $ do
