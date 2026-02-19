@@ -13,6 +13,7 @@ import Data.Bits (shiftL)
 import qualified Data.ByteString.Char8 as ByteString
 import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.HashMap.Strict as HashMap
+import Data.Maybe (fromMaybe)
 import Data.ProtoLens.Encoding
 import Data.ProtoLens.Message
 import qualified Data.Text as Text
@@ -67,14 +68,7 @@ otlpExporter conf = liftIO $ do
                     Nothing -> pure $ Failure $ Just err
                 Right ok -> pure ok
       , metricExporterShutdown = pure ()
-      , metricExporterTemporality = \case
-          OT.CounterKind -> OT.CumulativeTemporality
-          OT.UpDownCounterKind -> OT.CumulativeTemporality
-          OT.HistogramKind -> OT.CumulativeTemporality
-          OT.GaugeKind -> OT.CumulativeTemporality
-          OT.ObservableCounterKind -> OT.CumulativeTemporality
-          OT.ObservableUpDownCounterKind -> OT.CumulativeTemporality
-          OT.ObservableGaugeKind -> OT.CumulativeTemporality
+      , metricExporterTemporality = metricsTemporalitySelector conf
       }
   where
     retryDelay = 100_000
@@ -218,6 +212,7 @@ numberDataPointToProto :: OT.DataPoint Double -> NumberDataPoint
 numberDataPointToProto OT.DataPoint {..} =
   defMessage
     & Metrics_Fields.vec'attributes .~ attributesToProto dataPointAttributes
+    & maybe id ((Metrics_Fields.startTimeUnixNano .~) . timestampNanoseconds) dataPointStartTimestamp
     & Metrics_Fields.timeUnixNano .~ timestampNanoseconds dataPointTimestamp
     & Metrics_Fields.asDouble .~ dataPointValue
 
@@ -226,6 +221,7 @@ histogramDataPointToProto :: OT.HistogramDataPoint -> HistogramDataPoint
 histogramDataPointToProto OT.HistogramDataPoint {..} =
   defMessage
     & Metrics_Fields.vec'attributes .~ attributesToProto histogramDataPointAttributes
+    & maybe id ((Metrics_Fields.startTimeUnixNano .~) . timestampNanoseconds) histogramDataPointStartTimestamp
     & Metrics_Fields.timeUnixNano .~ timestampNanoseconds histogramDataPointTimestamp
     & Metrics_Fields.count .~ fromIntegral histogramDataPointCount
     & Metrics_Fields.sum .~ histogramDataPointSum
@@ -241,6 +237,28 @@ toProtoTemporality :: OT.AggregationTemporality -> ProtoMetrics.AggregationTempo
 toProtoTemporality = \case
   OT.DeltaTemporality -> AGGREGATION_TEMPORALITY_DELTA
   OT.CumulativeTemporality -> AGGREGATION_TEMPORALITY_CUMULATIVE
+
+
+metricsTemporalitySelector :: OTLPExporterConfig -> OT.InstrumentKind -> OT.AggregationTemporality
+metricsTemporalitySelector conf kind =
+  case fromMaybe MetricsTemporalityCumulative (otlpMetricsTemporalityPreference conf) of
+    MetricsTemporalityCumulative -> OT.CumulativeTemporality
+    MetricsTemporalityDelta -> case kind of
+      OT.CounterKind -> OT.DeltaTemporality
+      OT.ObservableCounterKind -> OT.DeltaTemporality
+      OT.HistogramKind -> OT.DeltaTemporality
+      OT.UpDownCounterKind -> OT.CumulativeTemporality
+      OT.ObservableUpDownCounterKind -> OT.CumulativeTemporality
+      OT.GaugeKind -> OT.CumulativeTemporality
+      OT.ObservableGaugeKind -> OT.CumulativeTemporality
+    MetricsTemporalityLowMemory -> case kind of
+      OT.CounterKind -> OT.DeltaTemporality
+      OT.HistogramKind -> OT.DeltaTemporality
+      OT.UpDownCounterKind -> OT.CumulativeTemporality
+      OT.ObservableCounterKind -> OT.CumulativeTemporality
+      OT.ObservableUpDownCounterKind -> OT.CumulativeTemporality
+      OT.GaugeKind -> OT.CumulativeTemporality
+      OT.ObservableGaugeKind -> OT.CumulativeTemporality
 
 
 attributesToProto :: Attributes -> Vector KeyValue
