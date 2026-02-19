@@ -100,6 +100,11 @@ tests:
     - hs-opentelemetry-api
     - hs-opentelemetry-sdk
     - hs-opentelemetry-exporter-in-memory
+    - hs-opentelemetry-exporter-otlp ^>= 0.1
+    - hs-opentelemetry-otlp
     - hspec
+    - hspec-golden
+    - microlens
     - text
     - unordered-containers
+    - vector
