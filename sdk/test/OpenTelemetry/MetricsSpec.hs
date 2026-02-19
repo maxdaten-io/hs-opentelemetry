@@ -12,6 +12,7 @@ import qualified Data.HashMap.Strict as HashMap
 import Data.IORef
 import Data.List (find)
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Vector as Vector
 import OpenTelemetry.Attributes
 import OpenTelemetry.Exporter.Metric
@@ -113,6 +114,14 @@ expectSumMetric metricName batch =
   case find isTargetMetric (flattenMetrics batch) of
     Just metricData -> pure metricData
     Nothing -> failSpec ("expected sum metric named " <> show metricName)
+  where
+    isTargetMetric SumData {sumName} = sumName == metricName
+    isTargetMetric _ = False
+
+
+sumMetricsNamed :: Text -> MetricExportBatch -> [MetricData]
+sumMetricsNamed metricName =
+  filter isTargetMetric . flattenMetrics
   where
     isTargetMetric SumData {sumName} = sumName == metricName
     isTargetMetric _ = False
@@ -286,6 +295,51 @@ spec = describe "Metrics" $ do
     batchesAfterShutdown <- length <$> readIORef batchesRef
 
     batchesAfterShutdown `shouldBe` batchesBeforeShutdown
+
+  describe "duplicate instrument registration" $ do
+    it "merges identical duplicate counters into one exported metric" $ do
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.duplicates" meterOptions
+        counter1 <- createCounter meter "requests_total" "requests" "1"
+        counter2 <- createCounter meter "requests_total" "requests" "1"
+
+        counterAdd counter1 3 mempty
+        counterAdd counter2 5 mempty
+        forceFlushMeterProvider provider
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      let duplicates = sumMetricsNamed "requests_total" exported
+      length duplicates `shouldBe` 1
+      case duplicates of
+        [metricData] -> singleSumPointValue metricData `shouldReturn` 8
+        _ -> failSpec "expected one merged counter metric"
+
+    it "keeps first-seen metric name for case-insensitive duplicates" $ do
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.duplicates" meterOptions
+        counter1 <- createCounter meter "requestCount" "requests" "1"
+        counter2 <- createCounter meter "RequestCount" "requests" "1"
+
+        counterAdd counter1 2 mempty
+        counterAdd counter2 3 mempty
+        forceFlushMeterProvider provider
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      let matchingNames =
+            [ sumName
+            | SumData {sumName} <- flattenMetrics exported
+            , T.toCaseFold sumName == "requestcount"
+            ]
+      matchingNames `shouldBe` ["requestCount"]
+      case sumMetricsNamed "requestCount" exported of
+        [metricData] -> singleSumPointValue metricData `shouldReturn` 5
+        _ -> failSpec "expected one merged metric with first-seen case"
 
   describe "gauge instruments" $ do
     it "records synchronous gauge values via gaugeRecord" $ do
