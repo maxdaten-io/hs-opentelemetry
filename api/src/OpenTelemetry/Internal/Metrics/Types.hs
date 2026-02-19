@@ -21,6 +21,7 @@ import OpenTelemetry.Resource
 
 data MetricExporter = MetricExporter
   { metricExporterExport :: MaterializedResources -> HashMap InstrumentationLibrary (Vector MetricData) -> IO ExportResult
+  , metricExporterForceFlush :: IO ()
   , metricExporterShutdown :: IO ()
   , metricExporterTemporality :: InstrumentKind -> AggregationTemporality
   }
@@ -46,6 +47,7 @@ data MeterProvider = MeterProvider
   , meterProviderResources :: !MaterializedResources
   , meterProviderAttributeLimits :: !AttributeLimits
   , meterProviderMetricStreams :: !(IORef [MetricStream])
+  , meterProviderIsShutdown :: !(IORef Bool)
   }
 
 

@@ -52,7 +52,7 @@ module OpenTelemetry.Metrics.Core (
 ) where
 
 import Control.Concurrent.Async (wait)
-import Control.Monad (forM, forM_)
+import Control.Monad (forM, forM_, unless, when)
 import Control.Monad.IO.Class
 import qualified Data.HashMap.Strict as H
 import Data.IORef
@@ -125,12 +125,14 @@ getMeterProviderResources = meterProviderResources
 createMeterProvider :: (MonadIO m) => [MetricReader] -> MeterProviderOptions -> m MeterProvider
 createMeterProvider readers opts = liftIO $ do
   meterProviderMetricStreams <- newIORef []
+  meterProviderIsShutdown <- newIORef False
   let provider =
         MeterProvider
           { meterProviderMetricReaders = V.fromList readers
           , meterProviderResources = meterProviderOptionsResources opts
           , meterProviderAttributeLimits = meterProviderOptionsAttributeLimits opts
           , meterProviderMetricStreams
+          , meterProviderIsShutdown
           }
       collect = collectScopeMetrics provider
   forM_ readers $ \reader -> metricReaderSetCollect reader collect
@@ -139,13 +141,16 @@ createMeterProvider readers opts = liftIO $ do
 
 shutdownMeterProvider :: (MonadIO m) => MeterProvider -> m ()
 shutdownMeterProvider MeterProvider {..} = liftIO $ do
-  jobs <- forM meterProviderMetricReaders metricReaderShutdown
-  mapM_ wait jobs
+  alreadyShutdown <- atomicModifyIORef' meterProviderIsShutdown (\shutdown -> (True, shutdown))
+  unless alreadyShutdown $ do
+    jobs <- forM meterProviderMetricReaders metricReaderShutdown
+    mapM_ wait jobs
 
 
 forceFlushMeterProvider :: (MonadIO m) => MeterProvider -> m ()
-forceFlushMeterProvider MeterProvider {..} =
-  liftIO $
+forceFlushMeterProvider MeterProvider {..} = liftIO $ do
+  shutdown <- readIORef meterProviderIsShutdown
+  unless shutdown $
     mapM_ metricReaderForceFlush meterProviderMetricReaders
 
 
@@ -164,6 +169,10 @@ getMeterMeterProvider = meterProvider
 registerMetricStream :: MeterProvider -> MetricStream -> IO ()
 registerMetricStream MeterProvider {meterProviderMetricStreams} stream =
   atomicModifyIORef' meterProviderMetricStreams (\streams -> (stream : streams, ()))
+
+
+isProviderShutdown :: MeterProvider -> IO Bool
+isProviderShutdown MeterProvider {meterProviderIsShutdown} = readIORef meterProviderIsShutdown
 
 
 collectScopeMetrics :: MeterProvider -> IO (MaterializedResources, [ScopeMetrics])
@@ -255,14 +264,18 @@ createCounter meter name desc unit = liftIO $ do
                   | (attrs, value) <- H.toList values
                   ]
             }
-  registerMetricStream provider (MetricStream (meterName meter) CounterKind collectFn)
+  shutdown <- isProviderShutdown provider
+  unless shutdown $
+    registerMetricStream provider (MetricStream (meterName meter) CounterKind collectFn)
   pure $
     Counter
       { counterName = name
       , counterDescription = desc
       , counterUnit = unit
       , counterMeter = meter
-      , counterAdd = addFn
+      , counterAdd = \value attrs -> do
+          active <- not <$> isProviderShutdown provider
+          when active (addFn value attrs)
       }
 
 
@@ -294,14 +307,18 @@ createUpDownCounter meter name desc unit = liftIO $ do
                   | (attrs, value) <- H.toList values
                   ]
             }
-  registerMetricStream provider (MetricStream (meterName meter) UpDownCounterKind collectFn)
+  shutdown <- isProviderShutdown provider
+  unless shutdown $
+    registerMetricStream provider (MetricStream (meterName meter) UpDownCounterKind collectFn)
   pure $
     UpDownCounter
       { upDownCounterName = name
       , upDownCounterDescription = desc
       , upDownCounterUnit = unit
       , upDownCounterMeter = meter
-      , upDownCounterAdd = addFn
+      , upDownCounterAdd = \value attrs -> do
+          active <- not <$> isProviderShutdown provider
+          when active (addFn value attrs)
       }
 
 
@@ -375,14 +392,18 @@ createHistogram meter name desc unit = liftIO $ do
                   | (attrs, hs) <- H.toList values
                   ]
             }
-  registerMetricStream provider (MetricStream (meterName meter) HistogramKind collectFn)
+  shutdown <- isProviderShutdown provider
+  unless shutdown $
+    registerMetricStream provider (MetricStream (meterName meter) HistogramKind collectFn)
   pure $
     Histogram
       { histogramName = name
       , histogramDescription = desc
       , histogramUnit = unit
       , histogramMeter = meter
-      , histogramRecord = recordFn
+      , histogramRecord = \value attrs -> do
+          active <- not <$> isProviderShutdown provider
+          when active (recordFn value attrs)
       }
 
 
@@ -411,14 +432,18 @@ createGauge meter name desc unit = liftIO $ do
                   | (attrs, value) <- H.toList values
                   ]
             }
-  registerMetricStream provider (MetricStream (meterName meter) GaugeKind collectFn)
+  shutdown <- isProviderShutdown provider
+  unless shutdown $
+    registerMetricStream provider (MetricStream (meterName meter) GaugeKind collectFn)
   pure $
     Gauge
       { gaugeName = name
       , gaugeDescription = desc
       , gaugeUnit = unit
       , gaugeMeter = meter
-      , gaugeRecord = recordFn
+      , gaugeRecord = \value attrs -> do
+          active <- not <$> isProviderShutdown provider
+          when active (recordFn value attrs)
       }
 
 
@@ -459,14 +484,20 @@ createObservableGauge meter name desc unit callbacks = liftIO $ do
                   | (attrs, value) <- H.toList values
                   ]
             }
-  registerMetricStream provider (MetricStream (meterName meter) ObservableGaugeKind collectFn)
+  shutdown <- isProviderShutdown provider
+  unless shutdown $
+    registerMetricStream provider (MetricStream (meterName meter) ObservableGaugeKind collectFn)
   pure $
     ObservableGauge
       { observableGaugeName = name
       , observableGaugeDescription = desc
       , observableGaugeUnit = unit
       , observableGaugeMeter = meter
-      , observableGaugeRegisterCallback = registerInCallbackRegistry callbackRegistry
+      , observableGaugeRegisterCallback = \callback -> do
+          active <- not <$> isProviderShutdown provider
+          if active
+            then registerInCallbackRegistry callbackRegistry callback
+            else pure (CallbackRegistration (pure ()))
       }
 
 
@@ -511,14 +542,20 @@ createObservableCounter meter name desc unit callbacks = liftIO $ do
                   | (attrs, value) <- H.toList values
                   ]
             }
-  registerMetricStream provider (MetricStream (meterName meter) ObservableCounterKind collectFn)
+  shutdown <- isProviderShutdown provider
+  unless shutdown $
+    registerMetricStream provider (MetricStream (meterName meter) ObservableCounterKind collectFn)
   pure $
     ObservableCounter
       { observableCounterName = name
       , observableCounterDescription = desc
       , observableCounterUnit = unit
       , observableCounterMeter = meter
-      , observableCounterRegisterCallback = registerInCallbackRegistry callbackRegistry
+      , observableCounterRegisterCallback = \callback -> do
+          active <- not <$> isProviderShutdown provider
+          if active
+            then registerInCallbackRegistry callbackRegistry callback
+            else pure (CallbackRegistration (pure ()))
       }
 
 
@@ -561,14 +598,20 @@ createObservableUpDownCounter meter name desc unit callbacks = liftIO $ do
                   | (attrs, value) <- H.toList values
                   ]
             }
-  registerMetricStream provider (MetricStream (meterName meter) ObservableUpDownCounterKind collectFn)
+  shutdown <- isProviderShutdown provider
+  unless shutdown $
+    registerMetricStream provider (MetricStream (meterName meter) ObservableUpDownCounterKind collectFn)
   pure $
     ObservableUpDownCounter
       { observableUpDownCounterName = name
       , observableUpDownCounterDescription = desc
       , observableUpDownCounterUnit = unit
       , observableUpDownCounterMeter = meter
-      , observableUpDownCounterRegisterCallback = registerInCallbackRegistry callbackRegistry
+      , observableUpDownCounterRegisterCallback = \callback -> do
+          active <- not <$> isProviderShutdown provider
+          if active
+            then registerInCallbackRegistry callbackRegistry callback
+            else pure (CallbackRegistration (pure ()))
       }
 
 
