@@ -1,22 +1,41 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
 
 module OpenTelemetry.MetricsSpec (spec) where
 
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar, threadDelay)
+import Control.Exception (bracket)
+import qualified Data.HashMap.Strict as HashMap
 import Data.IORef
+import Data.List (find)
 import Data.Text (Text)
+import qualified Data.Vector as Vector
 import OpenTelemetry.Attributes
 import OpenTelemetry.Exporter.Metric
+import qualified OpenTelemetry.Exporter.OTLP.Config as OTLPConfig
+import qualified OpenTelemetry.Exporter.OTLP.Metric as OTLPMetric
 import OpenTelemetry.Metrics
-import OpenTelemetry.Metrics.Core (forceFlushMeterProvider)
-import OpenTelemetry.Metrics.MetricReader (manualReader)
+import OpenTelemetry.Metrics.Core (
+  DataPoint (..),
+  HistogramDataPoint (..),
+  MeterProvider,
+  MetricData (..),
+  forceFlushMeterProvider,
+ )
+import OpenTelemetry.Metrics.MetricReader (PeriodicReaderConfig (..), manualReader, periodicReader)
 import OpenTelemetry.Resource
+import System.Environment (lookupEnv, setEnv, unsetEnv)
+import System.Timeout (timeout)
 import Test.Hspec
 
 
 type ExportBatch = (MaterializedResources, Bool)
+
+
+type MetricExportBatch = HashMap.HashMap InstrumentationLibrary (Vector.Vector MetricData)
 
 
 mkCaptureExporter :: IO (IORef [ExportBatch], IORef Bool, MetricExporter)
@@ -33,6 +52,123 @@ mkCaptureExporter = do
           , metricExporterTemporality = const CumulativeTemporality
           }
   pure (batchesRef, shutdownRef, exporter)
+
+
+mkTemporalityCaptureExporter
+  :: (InstrumentKind -> AggregationTemporality)
+  -> IO (IORef [MetricExportBatch], MetricExporter)
+mkTemporalityCaptureExporter temporalitySelector = do
+  batchesRef <- newIORef []
+  let exporter =
+        MetricExporter
+          { metricExporterExport = \_resources byScope -> do
+              modifyIORef' batchesRef (byScope :)
+              pure Success
+          , metricExporterShutdown = pure ()
+          , metricExporterTemporality = temporalitySelector
+          }
+  pure (batchesRef, exporter)
+
+
+mkFlakyTemporalityCaptureExporter
+  :: (InstrumentKind -> AggregationTemporality)
+  -> IO (IORef [MetricExportBatch], MetricExporter)
+mkFlakyTemporalityCaptureExporter temporalitySelector = do
+  batchesRef <- newIORef []
+  callsRef <- newIORef (0 :: Int)
+  let exporter =
+        MetricExporter
+          { metricExporterExport = \_resources byScope -> do
+              modifyIORef' batchesRef (byScope :)
+              callCount <- readIORef callsRef
+              writeIORef callsRef (callCount + 1)
+              if callCount == 0
+                then pure (Failure Nothing)
+                else pure Success
+          , metricExporterShutdown = pure ()
+          , metricExporterTemporality = temporalitySelector
+          }
+  pure (batchesRef, exporter)
+
+
+withMeterProvider :: [MetricExporter] -> (MeterProvider -> IO a) -> IO a
+withMeterProvider exporters =
+  bracket makeProvider shutdownMeterProvider
+  where
+    makeProvider = do
+      readers <- mapM manualReader exporters
+      createMeterProvider readers emptyMeterProviderOptions
+
+
+flattenMetrics :: MetricExportBatch -> [MetricData]
+flattenMetrics = concatMap Vector.toList . HashMap.elems
+
+
+expectSumMetric :: Text -> MetricExportBatch -> IO MetricData
+expectSumMetric metricName batch =
+  case find isTargetMetric (flattenMetrics batch) of
+    Just metricData -> pure metricData
+    Nothing -> failSpec ("expected sum metric named " <> show metricName)
+  where
+    isTargetMetric SumData {sumName} = sumName == metricName
+    isTargetMetric _ = False
+
+
+expectHistogramMetric :: Text -> MetricExportBatch -> IO MetricData
+expectHistogramMetric metricName batch =
+  case find isTargetMetric (flattenMetrics batch) of
+    Just metricData -> pure metricData
+    Nothing -> failSpec ("expected histogram metric named " <> show metricName)
+  where
+    isTargetMetric HistogramData {histogramName} = histogramName == metricName
+    isTargetMetric _ = False
+
+
+singleSumPointValue :: MetricData -> IO Double
+singleSumPointValue SumData {sumDataPoints} =
+  case Vector.toList sumDataPoints of
+    [DataPoint {dataPointValue}] -> pure dataPointValue
+    points -> failSpec ("expected exactly one sum point, got " <> show (length points))
+singleSumPointValue metricData = failSpec ("expected sum metric, got " <> show metricData)
+
+
+singleSumPoint :: MetricData -> IO (DataPoint Double)
+singleSumPoint SumData {sumDataPoints} =
+  case Vector.toList sumDataPoints of
+    [point] -> pure point
+    points -> failSpec ("expected exactly one sum point, got " <> show (length points))
+singleSumPoint metricData = failSpec ("expected sum metric, got " <> show metricData)
+
+
+singleHistogramPoint :: MetricData -> IO HistogramDataPoint
+singleHistogramPoint HistogramData {histogramDataPoints} =
+  case Vector.toList histogramDataPoints of
+    [point] -> pure point
+    points -> failSpec ("expected exactly one histogram point, got " <> show (length points))
+singleHistogramPoint metricData = failSpec ("expected histogram metric, got " <> show metricData)
+
+
+secondBatch :: IORef [MetricExportBatch] -> IO MetricExportBatch
+secondBatch batchesRef = do
+  batches <- reverse <$> readIORef batchesRef
+  case batches of
+    (_first : second : _) -> pure second
+    _ -> failSpec ("expected at least two export batches, got " <> show (length batches))
+
+
+failSpec :: String -> IO a
+failSpec message = expectationFailure message >> fail message
+
+
+withEnvVar :: String -> Maybe String -> IO a -> IO a
+withEnvVar key value action = bracket (lookupEnv key) restore $ \_ -> do
+  case value of
+    Nothing -> unsetEnv key
+    Just v -> setEnv key v
+  action
+  where
+    restore Nothing = unsetEnv key
+    restore (Just v) = setEnv key v
 
 
 spec :: Spec
@@ -81,3 +217,259 @@ spec = describe "Metrics" $ do
 
     shutdownMeterProvider provider
     readIORef shutdownRef `shouldReturn` True
+
+  describe "temporality per instrument kind" $ do
+    it "supports Counter delta while ObservableCounter remains cumulative" $ do
+      observableValueRef <- newIORef 3
+      (batchesRef, exporter) <-
+        mkTemporalityCaptureExporter $ \kind -> case kind of
+          CounterKind -> DeltaTemporality
+          ObservableCounterKind -> CumulativeTemporality
+          _ -> CumulativeTemporality
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.temporality" meterOptions
+        counter <- createCounter meter "requests_total" "requests" "1"
+        _ <- createObservableCounter meter "workers_total" "workers" "1" (\_ -> readIORef observableValueRef)
+
+        counterAdd counter 5 mempty
+        forceFlushMeterProvider provider
+
+        writeIORef observableValueRef 9
+        counterAdd counter 7 mempty
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      counterMetric <- expectSumMetric "requests_total" exported
+      observableMetric <- expectSumMetric "workers_total" exported
+
+      sumTemporality counterMetric `shouldBe` DeltaTemporality
+      sumTemporality observableMetric `shouldBe` CumulativeTemporality
+      singleSumPointValue counterMetric `shouldReturn` 7
+      singleSumPointValue observableMetric `shouldReturn` 9
+
+    it "supports ObservableCounter delta while Counter remains cumulative" $ do
+      observableValueRef <- newIORef 2
+      (batchesRef, exporter) <-
+        mkTemporalityCaptureExporter $ \kind -> case kind of
+          CounterKind -> CumulativeTemporality
+          ObservableCounterKind -> DeltaTemporality
+          _ -> CumulativeTemporality
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.temporality" meterOptions
+        counter <- createCounter meter "requests_total" "requests" "1"
+        _ <- createObservableCounter meter "workers_total" "workers" "1" (\_ -> readIORef observableValueRef)
+
+        counterAdd counter 5 mempty
+        forceFlushMeterProvider provider
+
+        writeIORef observableValueRef 5
+        counterAdd counter 7 mempty
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      counterMetric <- expectSumMetric "requests_total" exported
+      observableMetric <- expectSumMetric "workers_total" exported
+
+      sumTemporality counterMetric `shouldBe` CumulativeTemporality
+      sumTemporality observableMetric `shouldBe` DeltaTemporality
+      singleSumPointValue counterMetric `shouldReturn` 12
+      singleSumPointValue observableMetric `shouldReturn` 3
+
+    it "supports UpDownCounter delta while ObservableUpDownCounter remains cumulative" $ do
+      observableValueRef <- newIORef 10
+      (batchesRef, exporter) <-
+        mkTemporalityCaptureExporter $ \kind -> case kind of
+          UpDownCounterKind -> DeltaTemporality
+          ObservableUpDownCounterKind -> CumulativeTemporality
+          _ -> CumulativeTemporality
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.temporality" meterOptions
+        upDownCounter <- createUpDownCounter meter "queue_depth" "depth" "1"
+        _ <- createObservableUpDownCounter meter "pressure_level" "pressure" "1" (\_ -> readIORef observableValueRef)
+
+        upDownCounterAdd upDownCounter 4 mempty
+        forceFlushMeterProvider provider
+
+        writeIORef observableValueRef 6
+        upDownCounterAdd upDownCounter (-1) mempty
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      upDownMetric <- expectSumMetric "queue_depth" exported
+      observableMetric <- expectSumMetric "pressure_level" exported
+
+      sumTemporality upDownMetric `shouldBe` DeltaTemporality
+      sumTemporality observableMetric `shouldBe` CumulativeTemporality
+      singleSumPointValue upDownMetric `shouldReturn` (-1)
+      singleSumPointValue observableMetric `shouldReturn` 6
+
+    it "converts cumulative histogram data to delta with min/max dropped" $ do
+      (batchesRef, exporter) <-
+        mkTemporalityCaptureExporter $ \kind -> case kind of
+          HistogramKind -> DeltaTemporality
+          _ -> CumulativeTemporality
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.temporality" meterOptions
+        histogram <- createHistogram meter "request_latency_ms" "latency" "ms"
+
+        histogramRecord histogram 3 mempty
+        histogramRecord histogram 7 mempty
+        forceFlushMeterProvider provider
+
+        histogramRecord histogram 5 mempty
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      histogramMetric <- expectHistogramMetric "request_latency_ms" exported
+      point <- singleHistogramPoint histogramMetric
+
+      histogramTemporality histogramMetric `shouldBe` DeltaTemporality
+      histogramDataPointCount point `shouldBe` 1
+      histogramDataPointSum point `shouldBe` 5
+      histogramDataPointMin point `shouldBe` Nothing
+      histogramDataPointMax point `shouldBe` Nothing
+      sum (Vector.toList (histogramDataPointBucketCounts point)) `shouldBe` 1
+
+    it "advances delta baseline on collection even when export fails" $ do
+      (batchesRef, exporter) <-
+        mkFlakyTemporalityCaptureExporter $ \kind -> case kind of
+          CounterKind -> DeltaTemporality
+          _ -> CumulativeTemporality
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.temporality" meterOptions
+        counter <- createCounter meter "requests_total" "requests" "1"
+
+        counterAdd counter 5 mempty
+        forceFlushMeterProvider provider
+
+        counterAdd counter 7 mempty
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      counterMetric <- expectSumMetric "requests_total" exported
+      sumTemporality counterMetric `shouldBe` DeltaTemporality
+      singleSumPointValue counterMetric `shouldReturn` 7
+
+    it "keeps temporality state independent across multiple readers" $ do
+      (deltaBatchesRef, deltaExporter) <-
+        mkTemporalityCaptureExporter $ \kind -> case kind of
+          CounterKind -> DeltaTemporality
+          _ -> CumulativeTemporality
+      (cumulativeBatchesRef, cumulativeExporter) <-
+        mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [deltaExporter, cumulativeExporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.temporality" meterOptions
+        counter <- createCounter meter "requests_total" "requests" "1"
+
+        counterAdd counter 5 mempty
+        forceFlushMeterProvider provider
+
+        counterAdd counter 7 mempty
+        forceFlushMeterProvider provider
+
+      deltaExported <- secondBatch deltaBatchesRef
+      cumulativeExported <- secondBatch cumulativeBatchesRef
+      deltaMetric <- expectSumMetric "requests_total" deltaExported
+      cumulativeMetric <- expectSumMetric "requests_total" cumulativeExported
+
+      sumTemporality deltaMetric `shouldBe` DeltaTemporality
+      sumTemporality cumulativeMetric `shouldBe` CumulativeTemporality
+      singleSumPointValue deltaMetric `shouldReturn` 7
+      singleSumPointValue cumulativeMetric `shouldReturn` 12
+
+    it "sets delta sum start timestamp to previous collection end" $ do
+      (batchesRef, exporter) <-
+        mkTemporalityCaptureExporter $ \kind -> case kind of
+          CounterKind -> DeltaTemporality
+          _ -> CumulativeTemporality
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.temporality" meterOptions
+        counter <- createCounter meter "requests_total" "requests" "1"
+
+        counterAdd counter 5 mempty
+        forceFlushMeterProvider provider
+
+        counterAdd counter 7 mempty
+        forceFlushMeterProvider provider
+
+      batches <- reverse <$> readIORef batchesRef
+      case batches of
+        (firstBatch : secondBatch_ : _) -> do
+          firstMetric <- expectSumMetric "requests_total" firstBatch
+          secondMetric <- expectSumMetric "requests_total" secondBatch_
+          firstPoint <- singleSumPoint firstMetric
+          secondPoint <- singleSumPoint secondMetric
+          dataPointStartTimestamp secondPoint `shouldBe` Just (dataPointTimestamp firstPoint)
+        _ -> failSpec ("expected at least two export batches, got " <> show (length batches))
+
+    it "serializes concurrent force flush exports for a single reader" $ do
+      activeExports <- newIORef (0 :: Int)
+      maxConcurrent <- newIORef (0 :: Int)
+      let exporter =
+            MetricExporter
+              { metricExporterExport = \_resources _byScope -> do
+                  activeNow <- atomicModifyIORef' activeExports (\n -> let next = n + 1 in (next, next))
+                  atomicModifyIORef' maxConcurrent (\m -> (max m activeNow, ()))
+                  threadDelay 100000
+                  atomicModifyIORef' activeExports (\n -> (n - 1, ()))
+                  pure Success
+              , metricExporterShutdown = pure ()
+              , metricExporterTemporality = const CumulativeTemporality
+              }
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.temporality" meterOptions
+        counter <- createCounter meter "requests_total" "requests" "1"
+        counterAdd counter 1 mempty
+
+        done1 <- newEmptyMVar
+        done2 <- newEmptyMVar
+
+        _ <- forkIO $ forceFlushMeterProvider provider >> putMVar done1 ()
+        _ <- forkIO $ forceFlushMeterProvider provider >> putMVar done2 ()
+
+        takeMVar done1
+        takeMVar done2
+
+      readIORef maxConcurrent `shouldReturn` 1
+
+    it "honors OTLP metrics temporality preference from environment" $ do
+      withEnvVar "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE" (Just "lowmemory") $ do
+        conf <- OTLPConfig.loadExporterEnvironmentVariables
+        exporter <- OTLPMetric.otlpExporter conf
+        metricExporterTemporality exporter CounterKind `shouldBe` DeltaTemporality
+        metricExporterTemporality exporter HistogramKind `shouldBe` DeltaTemporality
+        metricExporterTemporality exporter ObservableCounterKind `shouldBe` CumulativeTemporality
+        metricExporterTemporality exporter UpDownCounterKind `shouldBe` CumulativeTemporality
+
+    it "applies periodic reader timeout to force flush exports" $ do
+      let exporter =
+            MetricExporter
+              { metricExporterExport = \_resources _byScope -> do
+                  threadDelay 200000
+                  pure Success
+              , metricExporterShutdown = pure ()
+              , metricExporterTemporality = const CumulativeTemporality
+              }
+      reader <- periodicReader (PeriodicReaderConfig 60000 20) exporter
+      provider <- createMeterProvider [reader] emptyMeterProviderOptions
+      meter <- getMeter provider "spec.metrics.temporality" meterOptions
+      counter <- createCounter meter "requests_total" "requests" "1"
+      counterAdd counter 1 mempty
+
+      result <- timeout 100000 (forceFlushMeterProvider provider)
+      shutdownMeterProvider provider
+      result `shouldSatisfy` maybe False (const True)
+
+    it "loads OTLP histogram aggregation preference from environment" $ do
+      withEnvVar "OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION" (Just "explicit_bucket_histogram") $ do
+        conf <- OTLPConfig.loadExporterEnvironmentVariables
+        OTLPConfig.otlpMetricsDefaultHistogramAggregation conf
+          `shouldBe` Just OTLPConfig.MetricsExplicitBucketHistogramAggregation
