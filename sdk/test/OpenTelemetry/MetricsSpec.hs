@@ -12,7 +12,9 @@ import qualified Data.HashMap.Strict as HashMap
 import Data.IORef
 import Data.List (find)
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Vector as Vector
+import Lens.Micro ((^.))
 import OpenTelemetry.Attributes
 import OpenTelemetry.Exporter.Metric
 import qualified OpenTelemetry.Exporter.OTLP.Config as OTLPConfig
@@ -23,11 +25,15 @@ import OpenTelemetry.Metrics.Core (
   HistogramDataPoint (..),
   MeterProvider,
   MetricData (..),
+  MetricReader (..),
   forceFlushMeterProvider,
  )
-import OpenTelemetry.Metrics.MetricReader (manualReader)
+import OpenTelemetry.Metrics.MetricReader (PeriodicReaderConfig (..), manualReader, periodicReader)
 import OpenTelemetry.Resource
+import qualified Proto.Opentelemetry.Proto.Common.V1.Common_Fields as Common_Fields
+import qualified Proto.Opentelemetry.Proto.Metrics.V1.Metrics_Fields as Metrics_Fields
 import System.Environment (lookupEnv, setEnv, unsetEnv)
+import System.Timeout (timeout)
 import Test.Hspec
 
 
@@ -47,6 +53,7 @@ mkCaptureExporter = do
               let hasMetrics = any (not . null) byScope
               modifyIORef' batchesRef ((resources, hasMetrics) :)
               pure Success
+          , metricExporterForceFlush = pure ()
           , metricExporterShutdown = writeIORef shutdownRef True
           , metricExporterTemporality = const CumulativeTemporality
           }
@@ -63,6 +70,7 @@ mkTemporalityCaptureExporter temporalitySelector = do
           { metricExporterExport = \_resources byScope -> do
               modifyIORef' batchesRef (byScope :)
               pure Success
+          , metricExporterForceFlush = pure ()
           , metricExporterShutdown = pure ()
           , metricExporterTemporality = temporalitySelector
           }
@@ -84,6 +92,7 @@ mkFlakyTemporalityCaptureExporter temporalitySelector = do
               if callCount == 0
                 then pure (Failure Nothing)
                 else pure Success
+          , metricExporterForceFlush = pure ()
           , metricExporterShutdown = pure ()
           , metricExporterTemporality = temporalitySelector
           }
@@ -113,6 +122,14 @@ expectSumMetric metricName batch =
     isTargetMetric _ = False
 
 
+sumMetricsNamed :: Text -> MetricExportBatch -> [MetricData]
+sumMetricsNamed metricName =
+  filter isTargetMetric . flattenMetrics
+  where
+    isTargetMetric SumData {sumName} = sumName == metricName
+    isTargetMetric _ = False
+
+
 expectHistogramMetric :: Text -> MetricExportBatch -> IO MetricData
 expectHistogramMetric metricName batch =
   case find isTargetMetric (flattenMetrics batch) of
@@ -120,6 +137,16 @@ expectHistogramMetric metricName batch =
     Nothing -> failSpec ("expected histogram metric named " <> show metricName)
   where
     isTargetMetric HistogramData {histogramName} = histogramName == metricName
+    isTargetMetric _ = False
+
+
+expectGaugeMetric :: Text -> MetricExportBatch -> IO MetricData
+expectGaugeMetric metricName batch =
+  case find isTargetMetric (flattenMetrics batch) of
+    Just metricData -> pure metricData
+    Nothing -> failSpec ("expected gauge metric named " <> show metricName)
+  where
+    isTargetMetric GaugeData {gaugeName} = gaugeName == metricName
     isTargetMetric _ = False
 
 
@@ -147,12 +174,28 @@ singleHistogramPoint HistogramData {histogramDataPoints} =
 singleHistogramPoint metricData = failSpec ("expected histogram metric, got " <> show metricData)
 
 
+singleGaugePointValue :: MetricData -> IO Double
+singleGaugePointValue GaugeData {gaugeDataPoints} =
+  case Vector.toList gaugeDataPoints of
+    [DataPoint {dataPointValue}] -> pure dataPointValue
+    points -> failSpec ("expected exactly one gauge point, got " <> show (length points))
+singleGaugePointValue metricData = failSpec ("expected gauge metric, got " <> show metricData)
+
+
 secondBatch :: IORef [MetricExportBatch] -> IO MetricExportBatch
 secondBatch batchesRef = do
   batches <- reverse <$> readIORef batchesRef
   case batches of
     (_first : second : _) -> pure second
     _ -> failSpec ("expected at least two export batches, got " <> show (length batches))
+
+
+firstBatch :: IORef [MetricExportBatch] -> IO MetricExportBatch
+firstBatch batchesRef = do
+  batches <- reverse <$> readIORef batchesRef
+  case batches of
+    (first : _) -> pure first
+    _ -> failSpec ("expected at least one export batch, got " <> show (length batches))
 
 
 failSpec :: String -> IO a
@@ -209,6 +252,56 @@ spec = describe "Metrics" $ do
         lookupAttribute (getMaterializedResourcesAttributes resources) "service.name"
           `shouldBe` Just (toAttribute ("metrics-spec" :: Text))
 
+  it "applies meter schema option to instrumentation scope" $ do
+    (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+    withMeterProvider [exporter] $ \provider -> do
+      meter <-
+        getMeter
+          provider
+          "spec.metrics.scope"
+          (meterOptions {meterSchema = Just "https://opentelemetry.io/schemas/1.0.0"})
+      counter <- createCounter meter "requests" "request count" "1"
+      counterAdd counter 1 mempty
+      forceFlushMeterProvider provider
+
+    batches <- reverse <$> readIORef batchesRef
+    case batches of
+      (firstBatch : _) ->
+        case find (\scope -> libraryName scope == "spec.metrics.scope") (HashMap.keys firstBatch) of
+          Just scope -> librarySchemaUrl scope `shouldBe` "https://opentelemetry.io/schemas/1.0.0"
+          Nothing -> expectationFailure "expected exported metrics for scope spec.metrics.scope"
+      [] -> expectationFailure "expected at least one metric export batch"
+
+  it "propagates meter version and scope attributes to exported scope" $ do
+    (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+    let scopeAttrs = addAttribute defaultAttributeLimits emptyAttributes "scope.attribute" ("present" :: Text)
+        scope =
+          InstrumentationLibrary
+            { libraryName = "spec.metrics.scope.meta"
+            , libraryVersion = "2.4.6"
+            , librarySchemaUrl = "https://opentelemetry.io/schemas/2.4.6"
+            , libraryAttributes = scopeAttrs
+            }
+    withMeterProvider [exporter] $ \provider -> do
+      meter <- getMeter provider scope meterOptions
+      counter <- createCounter meter "requests" "request count" "1"
+      counterAdd counter 1 mempty
+      forceFlushMeterProvider provider
+
+    exported <- firstBatch batchesRef
+    case find (\scope -> libraryName scope == "spec.metrics.scope.meta") (HashMap.keys exported) of
+      Just scope -> do
+        libraryVersion scope `shouldBe` "2.4.6"
+        librarySchemaUrl scope `shouldBe` "https://opentelemetry.io/schemas/2.4.6"
+        lookupAttribute (libraryAttributes scope) "scope.attribute"
+          `shouldBe` Just (toAttribute ("present" :: Text))
+      Nothing -> expectationFailure "expected exported metrics for scope spec.metrics.scope.meta"
+
+  it "keeps empty meter scope names functional" $ do
+    provider <- createMeterProvider [] emptyMeterProviderOptions
+    meter <- getMeter provider "" meterOptions
+    libraryName (meterName meter) `shouldBe` ""
+
   it "shutdown propagates to exporter" $ do
     (_batchesRef, shutdownRef, exporter) <- mkCaptureExporter
     reader <- manualReader exporter
@@ -216,6 +309,285 @@ spec = describe "Metrics" $ do
 
     shutdownMeterProvider provider
     readIORef shutdownRef `shouldReturn` True
+
+  it "does not allow reusing a metric reader across meter providers" $ do
+    (_batchesRef, _shutdownRef, exporter) <- mkCaptureExporter
+    reader <- manualReader exporter
+    provider <- createMeterProvider [reader] emptyMeterProviderOptions
+    createMeterProvider [reader] emptyMeterProviderOptions `shouldThrow` anyException
+    shutdownMeterProvider provider
+
+  it "manual reader collect fails after shutdown" $ do
+    (_batchesRef, _shutdownRef, exporter) <- mkCaptureExporter
+    reader <- manualReader exporter
+    _ <- metricReaderShutdown reader
+    threadDelay 10000
+
+    metricReaderCollect reader `shouldThrow` anyException
+
+  it "force flush delegates to exporter force flush" $ do
+    flushCountRef <- newIORef (0 :: Int)
+    let exporter =
+          MetricExporter
+            { metricExporterExport = \_resources _byScope -> pure Success
+            , metricExporterForceFlush = modifyIORef' flushCountRef (+ 1)
+            , metricExporterShutdown = pure ()
+            , metricExporterTemporality = const CumulativeTemporality
+            }
+    reader <- manualReader exporter
+    provider <- createMeterProvider [reader] emptyMeterProviderOptions
+    meter <- getMeter provider "spec.metrics" meterOptions
+    counter <- createCounter meter "requests" "request count" "1"
+    counterAdd counter 1 mempty
+    forceFlushMeterProvider provider
+
+    readIORef flushCountRef `shouldReturn` 1
+
+  it "force flush delegates to all registered metric readers" $ do
+    flushCountRef1 <- newIORef (0 :: Int)
+    flushCountRef2 <- newIORef (0 :: Int)
+    let mkExporter ref =
+          MetricExporter
+            { metricExporterExport = \_resources _byScope -> pure Success
+            , metricExporterForceFlush = modifyIORef' ref (+ 1)
+            , metricExporterShutdown = pure ()
+            , metricExporterTemporality = const CumulativeTemporality
+            }
+    reader1 <- manualReader (mkExporter flushCountRef1)
+    reader2 <- manualReader (mkExporter flushCountRef2)
+    provider <- createMeterProvider [reader1, reader2] emptyMeterProviderOptions
+    meter <- getMeter provider "spec.metrics" meterOptions
+    counter <- createCounter meter "requests" "request count" "1"
+    counterAdd counter 1 mempty
+    forceFlushMeterProvider provider
+
+    readIORef flushCountRef1 `shouldReturn` 1
+    readIORef flushCountRef2 `shouldReturn` 1
+
+  it "meters created after provider shutdown are no-op" $ do
+    (batchesRef, _shutdownRef, exporter) <- mkCaptureExporter
+    reader <- manualReader exporter
+    provider <- createMeterProvider [reader] emptyMeterProviderOptions
+
+    meter <- getMeter provider "spec.metrics" meterOptions
+    counter <- createCounter meter "requests" "request count" "1"
+    counterAdd counter 1 mempty
+    forceFlushMeterProvider provider
+    batchesBeforeShutdown <- length <$> readIORef batchesRef
+
+    shutdownMeterProvider provider
+
+    meterAfterShutdown <- getMeter provider "spec.metrics.after.shutdown" meterOptions
+    counterAfterShutdown <- createCounter meterAfterShutdown "requests_after_shutdown" "request count" "1"
+    counterAdd counterAfterShutdown 10 mempty
+    batchesAfterShutdown <- length <$> readIORef batchesRef
+    forceFlushMeterProvider provider
+    batchesAfterPostShutdownFlush <- length <$> readIORef batchesRef
+
+    batchesAfterShutdown `shouldBe` (batchesBeforeShutdown + 1)
+    batchesAfterPostShutdownFlush `shouldBe` batchesAfterShutdown
+
+  describe "duplicate instrument registration" $ do
+    it "merges identical duplicate counters into one exported metric" $ do
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.duplicates" meterOptions
+        counter1 <- createCounter meter "requests_total" "requests" "1"
+        counter2 <- createCounter meter "requests_total" "requests" "1"
+
+        counterAdd counter1 3 mempty
+        counterAdd counter2 5 mempty
+        forceFlushMeterProvider provider
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      let duplicates = sumMetricsNamed "requests_total" exported
+      length duplicates `shouldBe` 1
+      case duplicates of
+        [metricData] -> singleSumPointValue metricData `shouldReturn` 8
+        _ -> failSpec "expected one merged counter metric"
+
+    it "keeps first-seen metric name for case-insensitive duplicates" $ do
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.duplicates" meterOptions
+        counter1 <- createCounter meter "requestCount" "requests" "1"
+        counter2 <- createCounter meter "RequestCount" "requests" "1"
+
+        counterAdd counter1 2 mempty
+        counterAdd counter2 3 mempty
+        forceFlushMeterProvider provider
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      let matchingNames =
+            [ sumName
+            | SumData {sumName} <- flattenMetrics exported
+            , T.toCaseFold sumName == "requestcount"
+            ]
+      matchingNames `shouldBe` ["requestCount"]
+      case sumMetricsNamed "requestCount" exported of
+        [metricData] -> singleSumPointValue metricData `shouldReturn` 5
+        _ -> failSpec "expected one merged metric with first-seen case"
+
+    it "keeps conflicting instruments with different units as separate metrics" $ do
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.duplicates" meterOptions
+        counterMs <- createCounter meter "request_duration" "duration" "ms"
+        counterS <- createCounter meter "request_duration" "duration" "s"
+
+        counterAdd counterMs 3 mempty
+        counterAdd counterS 5 mempty
+        forceFlushMeterProvider provider
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      let units =
+            [ sumUnit
+            | SumData {sumName, sumUnit} <- flattenMetrics exported
+            , sumName == "request_duration"
+            ]
+      length units `shouldBe` 2
+      units `shouldSatisfy` (\present -> "ms" `elem` present && "s" `elem` present)
+
+  describe "gauge instruments" $ do
+    it "records synchronous gauge values via gaugeRecord" $ do
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.gauge" meterOptions
+        gauge <- createGauge meter "temperature" "temperature" "c"
+        gaugeRecord gauge 21.2 mempty
+        gaugeRecord gauge 22.8 mempty
+        forceFlushMeterProvider provider
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      gaugeMetric <- expectGaugeMetric "temperature" exported
+      singleGaugePointValue gaugeMetric `shouldReturn` 22.8
+
+    it "exports asynchronous observable gauge callback value" $ do
+      gaugeValueRef <- newIORef 3.5
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.gauge" meterOptions
+        _ <-
+          createObservableGauge
+            meter
+            "cpu_frequency"
+            "cpu frequency"
+            "GHz"
+            [ do
+                value <- readIORef gaugeValueRef
+                pure [observation value mempty]
+            ]
+
+        forceFlushMeterProvider provider
+        writeIORef gaugeValueRef 4.2
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      gaugeMetric <- expectGaugeMetric "cpu_frequency" exported
+      singleGaugePointValue gaugeMetric `shouldReturn` 4.2
+
+    it "supports multiple observations and callback unregister on observable gauge" $ do
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.gauge" meterOptions
+        observableGauge <- createObservableGauge meter "cpu_frequency" "cpu frequency" "GHz" []
+        registration <-
+          observableGaugeRegisterCallback observableGauge $
+            pure
+              [ observation 3.2 (HashMap.singleton "cpu" (toAttribute ("0" :: Text)))
+              , observation 3.8 (HashMap.singleton "cpu" (toAttribute ("1" :: Text)))
+              ]
+
+        forceFlushMeterProvider provider
+        unregisterCallback registration
+        forceFlushMeterProvider provider
+
+      batches <- reverse <$> readIORef batchesRef
+      case batches of
+        (firstBatch : secondBatch_ : _) -> do
+          firstMetric <- expectGaugeMetric "cpu_frequency" firstBatch
+          secondMetric <- expectGaugeMetric "cpu_frequency" secondBatch_
+          let firstPoints = case firstMetric of
+                GaugeData {gaugeDataPoints} -> Vector.length gaugeDataPoints
+                _ -> 0
+              secondPoints = case secondMetric of
+                GaugeData {gaugeDataPoints} -> Vector.length gaugeDataPoints
+                _ -> 0
+          firstPoints `shouldBe` 2
+          secondPoints `shouldBe` 0
+        _ -> failSpec ("expected at least two export batches, got " <> show (length batches))
+
+    it "evaluates every registered callback exactly once per collection" $ do
+      callbackCallsRef <- newIORef (0 :: Int)
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.gauge" meterOptions
+        _ <-
+          createObservableGauge
+            meter
+            "cpu_frequency"
+            "cpu frequency"
+            "GHz"
+            [ do
+                modifyIORef' callbackCallsRef (+ 1)
+                pure [observation 3.2 (HashMap.singleton "cpu" (toAttribute ("0" :: Text)))]
+            , do
+                modifyIORef' callbackCallsRef (+ 1)
+                pure [observation 3.8 (HashMap.singleton "cpu" (toAttribute ("1" :: Text)))]
+            ]
+
+        forceFlushMeterProvider provider
+        forceFlushMeterProvider provider
+
+      -- Two callbacks are invoked on each collection:
+      -- two explicit flushes + one shutdown flush from withMeterProvider.
+      readIORef callbackCallsRef `shouldReturn` 6
+      exported <- secondBatch batchesRef
+      gaugeMetric <- expectGaugeMetric "cpu_frequency" exported
+      case gaugeMetric of
+        GaugeData {gaugeDataPoints} -> Vector.length gaugeDataPoints `shouldBe` 2
+        _ -> failSpec "expected gauge metric for callback verification"
+
+    it "reports identical timestamps for observations from a single callback" $ do
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.gauge" meterOptions
+        _ <-
+          createObservableGauge
+            meter
+            "cpu_frequency"
+            "cpu frequency"
+            "GHz"
+            [ pure
+                [ observation 3.2 (HashMap.singleton "cpu" (toAttribute ("0" :: Text)))
+                , observation 3.8 (HashMap.singleton "cpu" (toAttribute ("1" :: Text)))
+                ]
+            ]
+
+        forceFlushMeterProvider provider
+
+      exported <- firstBatch batchesRef
+      gaugeMetric <- expectGaugeMetric "cpu_frequency" exported
+      case gaugeMetric of
+        GaugeData {gaugeDataPoints} ->
+          case Vector.toList gaugeDataPoints of
+            [] -> failSpec "expected at least one gauge datapoint"
+            firstPoint : rest ->
+              map dataPointTimestamp rest
+                `shouldSatisfy` all (== dataPointTimestamp firstPoint)
+        _ -> failSpec "expected gauge metric for callback timestamp verification"
 
   describe "temporality per instrument kind" $ do
     it "supports Counter delta while ObservableCounter remains cumulative" $ do
@@ -229,7 +601,16 @@ spec = describe "Metrics" $ do
       withMeterProvider [exporter] $ \provider -> do
         meter <- getMeter provider "spec.metrics.temporality" meterOptions
         counter <- createCounter meter "requests_total" "requests" "1"
-        _ <- createObservableCounter meter "workers_total" "workers" "1" (\_ -> readIORef observableValueRef)
+        _ <-
+          createObservableCounter
+            meter
+            "workers_total"
+            "workers"
+            "1"
+            [ do
+                value <- readIORef observableValueRef
+                pure [observation value mempty]
+            ]
 
         counterAdd counter 5 mempty
         forceFlushMeterProvider provider
@@ -258,7 +639,16 @@ spec = describe "Metrics" $ do
       withMeterProvider [exporter] $ \provider -> do
         meter <- getMeter provider "spec.metrics.temporality" meterOptions
         counter <- createCounter meter "requests_total" "requests" "1"
-        _ <- createObservableCounter meter "workers_total" "workers" "1" (\_ -> readIORef observableValueRef)
+        _ <-
+          createObservableCounter
+            meter
+            "workers_total"
+            "workers"
+            "1"
+            [ do
+                value <- readIORef observableValueRef
+                pure [observation value mempty]
+            ]
 
         counterAdd counter 5 mempty
         forceFlushMeterProvider provider
@@ -287,7 +677,16 @@ spec = describe "Metrics" $ do
       withMeterProvider [exporter] $ \provider -> do
         meter <- getMeter provider "spec.metrics.temporality" meterOptions
         upDownCounter <- createUpDownCounter meter "queue_depth" "depth" "1"
-        _ <- createObservableUpDownCounter meter "pressure_level" "pressure" "1" (\_ -> readIORef observableValueRef)
+        _ <-
+          createObservableUpDownCounter
+            meter
+            "pressure_level"
+            "pressure"
+            "1"
+            [ do
+                value <- readIORef observableValueRef
+                pure [observation value mempty]
+            ]
 
         upDownCounterAdd upDownCounter 4 mempty
         forceFlushMeterProvider provider
@@ -419,6 +818,7 @@ spec = describe "Metrics" $ do
                   threadDelay 100000
                   atomicModifyIORef' activeExports (\n -> (n - 1, ()))
                   pure Success
+              , metricExporterForceFlush = pure ()
               , metricExporterShutdown = pure ()
               , metricExporterTemporality = const CumulativeTemporality
               }
@@ -447,3 +847,72 @@ spec = describe "Metrics" $ do
         metricExporterTemporality exporter HistogramKind `shouldBe` DeltaTemporality
         metricExporterTemporality exporter ObservableCounterKind `shouldBe` CumulativeTemporality
         metricExporterTemporality exporter UpDownCounterKind `shouldBe` CumulativeTemporality
+
+    it "includes instrumentation scope attributes in OTLP scope metrics" $ do
+      let scopeAttrs = addAttribute defaultAttributeLimits emptyAttributes "scope.attribute" ("present" :: Text)
+          scope =
+            InstrumentationLibrary
+              { libraryName = "spec.metrics.temporality"
+              , libraryVersion = "1.0.0"
+              , librarySchemaUrl = "https://opentelemetry.io/schemas/1.0.0"
+              , libraryAttributes = scopeAttrs
+              }
+          scopeMetrics = OTLPMetric.makeScopeMetrics scope Vector.empty
+          exportedScope = scopeMetrics ^. Metrics_Fields.scope
+      exportedScope ^. Common_Fields.vec'attributes `shouldBe` OTLPMetric.attributesToProto scopeAttrs
+      exportedScope ^. Common_Fields.droppedAttributesCount `shouldBe` fromIntegral (getDropped scopeAttrs)
+
+    it "applies periodic reader timeout to force flush exports" $ do
+      let exporter =
+            MetricExporter
+              { metricExporterExport = \_resources _byScope -> do
+                  threadDelay 200000
+                  pure Success
+              , metricExporterForceFlush = pure ()
+              , metricExporterShutdown = pure ()
+              , metricExporterTemporality = const CumulativeTemporality
+              }
+      reader <- periodicReader (PeriodicReaderConfig 60000 20) exporter
+      provider <- createMeterProvider [reader] emptyMeterProviderOptions
+      meter <- getMeter provider "spec.metrics.temporality" meterOptions
+      counter <- createCounter meter "requests_total" "requests" "1"
+      counterAdd counter 1 mempty
+
+      result <- timeout 100000 (forceFlushMeterProvider provider)
+      shutdownMeterProvider provider
+      result `shouldSatisfy` maybe False (const True)
+
+    it "loads OTLP histogram aggregation preference from environment" $ do
+      withEnvVar "OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION" (Just "explicit_bucket_histogram") $ do
+        conf <- OTLPConfig.loadExporterEnvironmentVariables
+        OTLPConfig.otlpMetricsDefaultHistogramAggregation conf
+          `shouldBe` Just OTLPConfig.MetricsExplicitBucketHistogramAggregation
+
+    it "treats OTEL_METRICS_EXPORTER as case-insensitive enum" $ do
+      withEnvVar "OTEL_SDK_DISABLED" Nothing $
+        withEnvVar "OTEL_METRICS_EXPORTER" (Just "OtLp") $ do
+          (readers, _) <- getMeterProviderInitializationOptions
+          length readers `shouldBe` 1
+
+    it "treats empty OTEL_METRICS_EXPORTER as unset" $ do
+      withEnvVar "OTEL_SDK_DISABLED" Nothing $
+        withEnvVar "OTEL_METRICS_EXPORTER" (Just "") $ do
+          (readers, _) <- getMeterProviderInitializationOptions
+          length readers `shouldBe` 1
+
+    it "ignores unknown OTEL_METRICS_EXPORTER values and falls back to default" $ do
+      withEnvVar "OTEL_SDK_DISABLED" Nothing $
+        withEnvVar "OTEL_METRICS_EXPORTER" (Just "does-not-exist") $ do
+          (readers, _) <- getMeterProviderInitializationOptions
+          length readers `shouldBe` 1
+
+    it "disables metrics readers when OTEL_SDK_DISABLED is true" $ do
+      withEnvVar "OTEL_SDK_DISABLED" (Just "true") $
+        withEnvVar "OTEL_METRICS_EXPORTER" (Just "otlp") $ do
+          (readers, _) <- getMeterProviderInitializationOptions
+          length readers `shouldBe` 0
+          provider <- initializeMeterProvider
+          meter <- getMeter provider "spec.metrics.disabled" meterOptions
+          counter <- createCounter meter "requests" "request count" "1"
+          counterAdd counter 1 mempty
+          forceFlushMeterProvider provider
