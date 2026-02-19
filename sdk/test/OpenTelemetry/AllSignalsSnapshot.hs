@@ -151,9 +151,9 @@ emitMetrics meter = do
 
   gauge <- Metrics.createGauge meter "temperature_gauge" "Temperature" "c"
   Metrics.gaugeRecord gauge 21.5 mempty
-  _ <- Metrics.createObservableCounter meter "workers_total" "Workers" "1" (\_ -> pure 7.0)
-  _ <- Metrics.createObservableGauge meter "cpu_frequency" "CPU frequency" "GHz" (\_ -> pure 3.4)
-  _ <- Metrics.createObservableUpDownCounter meter "pressure_level" "Pressure" "1" (\_ -> pure (-1.5))
+  _ <- Metrics.createObservableCounter meter "workers_total" "Workers" "1" [pure [Metrics.observation 7.0 mempty]]
+  _ <- Metrics.createObservableGauge meter "cpu_frequency" "CPU frequency" "GHz" [pure [Metrics.observation 3.4 mempty]]
+  _ <- Metrics.createObservableUpDownCounter meter "pressure_level" "Pressure" "1" [pure [Metrics.observation (-1.5) mempty]]
   pure ()
 
 
