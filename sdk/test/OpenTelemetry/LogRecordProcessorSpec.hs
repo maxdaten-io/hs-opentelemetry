@@ -5,6 +5,7 @@
 module OpenTelemetry.LogRecordProcessorSpec (spec) where
 
 import Control.Concurrent (threadDelay)
+import Control.Monad (replicateM_)
 import qualified Data.HashMap.Strict as HashMap
 import Data.IORef
 import OpenTelemetry.Exporter.LogRecord
@@ -12,6 +13,8 @@ import OpenTelemetry.Internal.Common.Types (FlushResult (..))
 import OpenTelemetry.Internal.Logs.Types (LogRecordProcessor (..), emptyLogRecordArguments)
 import qualified OpenTelemetry.LogAttributes as LA
 import OpenTelemetry.Logs.Core
+import OpenTelemetry.Processor.Batch.LogRecord (batchProcessor)
+import OpenTelemetry.Processor.Batch.TimeoutConfig (BatchTimeoutConfig (..), batchTimeoutConfig)
 import OpenTelemetry.Processor.Simple.LogRecord
 import Test.Hspec
 
@@ -165,6 +168,26 @@ spec = describe "LogRecordProcessor" $ do
 
     _ <- emitLogRecord logger emptyLogRecordArguments
     readIORef sawMutationRef `shouldReturn` True
+
+  it "batch processor accepts up to maxQueueSize records before dropping" $ do
+    (countRef, exporter) <- mkCountingExporter
+    let config =
+          batchTimeoutConfig
+            { maxQueueSize = 3
+            , maxExportBatchSize = 3
+            , scheduledDelayMillis = 60000
+            , exportTimeoutMillis = 1000
+            }
+    processor <- batchProcessor config exporter
+    let provider = createLoggerProvider [processor] emptyLoggerProviderOptions
+        logger = makeLogger provider "spec.processor.batch"
+
+    replicateM_ 3 $ do
+      _ <- emitLogRecord logger emptyLogRecordArguments
+      pure ()
+
+    shutdownLoggerProvider provider
+    readIORef countRef `shouldReturn` 3
 
 
 isFlushSuccess :: FlushResult -> Bool

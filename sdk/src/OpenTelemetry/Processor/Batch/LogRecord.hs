@@ -32,7 +32,7 @@ boundedVector bounds exportBounds = BoundedVector bounds exportBounds Builder.em
 
 push :: a -> BoundedVector a -> Maybe (BoundedVector a)
 push s v =
-  if Builder.size (itemVector v) + 1 >= itemBounds v
+  if Builder.size (itemVector v) >= itemBounds v
     then Nothing
     else Just $! v {itemVector = itemVector v <> Builder.singleton s}
 
