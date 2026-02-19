@@ -51,6 +51,7 @@ import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class
 import qualified Data.HashMap.Strict as H
 import Data.IORef
+import Data.List (foldl')
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Vector as V
@@ -164,9 +165,23 @@ collectScopeMetrics MeterProvider {meterProviderMetricStreams, meterProviderReso
   streams <- readIORef meterProviderMetricStreams
   scoped <- forM streams $ \MetricStream {..} -> do
     metric <- metricStreamCollect
-    pure (metricStreamScope, V.singleton metric)
-  let grouped = H.fromListWith (<>) scoped
-  pure (meterProviderResources, fmap (uncurry ScopeMetrics) (H.toList grouped))
+    pure
+      ( metricStreamScope
+      , ScopeMetrics
+          { scopeMetricsScope = metricStreamScope
+          , scopeMetricsMetrics = V.singleton metric
+          , scopeMetricsInstrumentKinds = V.singleton metricStreamInstrumentKind
+          }
+      )
+  let grouped = H.fromListWith combineScopeMetrics scoped
+  pure (meterProviderResources, H.elems grouped)
+  where
+    combineScopeMetrics left right =
+      ScopeMetrics
+        { scopeMetricsScope = scopeMetricsScope left
+        , scopeMetricsMetrics = scopeMetricsMetrics left <> scopeMetricsMetrics right
+        , scopeMetricsInstrumentKinds = scopeMetricsInstrumentKinds left <> scopeMetricsInstrumentKinds right
+        }
 
 
 attributeMapToAttributes :: AttributeLimits -> AttributeMap -> Attributes
@@ -175,6 +190,7 @@ attributeMapToAttributes limits attrs = addAttributes limits emptyAttributes att
 
 createCounter :: (MonadIO m) => Meter -> Text -> Text -> Text -> m (Counter Double)
 createCounter meter name desc unit = liftIO $ do
+  startTs <- getTimestamp
   valuesRef <- newIORef H.empty
   let provider = getMeterMeterProvider meter
       limits = meterProviderAttributeLimits provider
@@ -195,13 +211,14 @@ createCounter meter name desc unit = liftIO $ do
                 V.fromList
                   [ DataPoint
                     { dataPointAttributes = attributeMapToAttributes limits attrs
+                    , dataPointStartTimestamp = Just startTs
                     , dataPointTimestamp = ts
                     , dataPointValue = value
                     }
                   | (attrs, value) <- H.toList values
                   ]
             }
-  registerMetricStream provider (MetricStream (meterName meter) collectFn)
+  registerMetricStream provider (MetricStream (meterName meter) CounterKind collectFn)
   pure $
     Counter
       { counterName = name
@@ -214,6 +231,7 @@ createCounter meter name desc unit = liftIO $ do
 
 createUpDownCounter :: (MonadIO m) => Meter -> Text -> Text -> Text -> m (UpDownCounter Double)
 createUpDownCounter meter name desc unit = liftIO $ do
+  startTs <- getTimestamp
   valuesRef <- newIORef H.empty
   let provider = getMeterMeterProvider meter
       limits = meterProviderAttributeLimits provider
@@ -232,13 +250,14 @@ createUpDownCounter meter name desc unit = liftIO $ do
                 V.fromList
                   [ DataPoint
                     { dataPointAttributes = attributeMapToAttributes limits attrs
+                    , dataPointStartTimestamp = Just startTs
                     , dataPointTimestamp = ts
                     , dataPointValue = value
                     }
                   | (attrs, value) <- H.toList values
                   ]
             }
-  registerMetricStream provider (MetricStream (meterName meter) collectFn)
+  registerMetricStream provider (MetricStream (meterName meter) UpDownCounterKind collectFn)
   pure $
     UpDownCounter
       { upDownCounterName = name
@@ -268,6 +287,7 @@ bucketIndex bounds value = fromMaybe (V.length bounds) $ V.findIndex (value <=) 
 
 createHistogram :: (MonadIO m) => Meter -> Text -> Text -> Text -> m (Histogram Double)
 createHistogram meter name desc unit = liftIO $ do
+  startTs <- getTimestamp
   valuesRef <- newIORef H.empty
   let provider = getMeterMeterProvider meter
       limits = meterProviderAttributeLimits provider
@@ -306,6 +326,7 @@ createHistogram meter name desc unit = liftIO $ do
                 V.fromList
                   [ HistogramDataPoint
                     { histogramDataPointAttributes = attributeMapToAttributes limits attrs
+                    , histogramDataPointStartTimestamp = Just startTs
                     , histogramDataPointTimestamp = ts
                     , histogramDataPointCount = hsCount hs
                     , histogramDataPointSum = hsSum hs
@@ -317,7 +338,7 @@ createHistogram meter name desc unit = liftIO $ do
                   | (attrs, hs) <- H.toList values
                   ]
             }
-  registerMetricStream provider (MetricStream (meterName meter) collectFn)
+  registerMetricStream provider (MetricStream (meterName meter) HistogramKind collectFn)
   pure $
     Histogram
       { histogramName = name
@@ -330,6 +351,7 @@ createHistogram meter name desc unit = liftIO $ do
 
 createGauge :: (MonadIO m) => Meter -> Text -> Text -> Text -> (AttributeMap -> IO Double) -> m (Gauge Double)
 createGauge meter name desc unit callback = liftIO $ do
+  startTs <- getTimestamp
   let provider = getMeterMeterProvider meter
       limits = meterProviderAttributeLimits provider
       collectFn = do
@@ -344,11 +366,12 @@ createGauge meter name desc unit callback = liftIO $ do
                 V.singleton
                   DataPoint
                     { dataPointAttributes = attributeMapToAttributes limits mempty
+                    , dataPointStartTimestamp = Just startTs
                     , dataPointTimestamp = ts
                     , dataPointValue = value
                     }
             }
-  registerMetricStream provider (MetricStream (meterName meter) collectFn)
+  registerMetricStream provider (MetricStream (meterName meter) GaugeKind collectFn)
   pure $
     Gauge
       { gaugeName = name
@@ -368,6 +391,7 @@ createObservableCounter
   -> (AttributeMap -> IO Double)
   -> m (ObservableCounter Double)
 createObservableCounter meter name desc unit callback = liftIO $ do
+  startTs <- getTimestamp
   let provider = getMeterMeterProvider meter
       limits = meterProviderAttributeLimits provider
       collectFn = do
@@ -384,11 +408,12 @@ createObservableCounter meter name desc unit callback = liftIO $ do
                 V.singleton
                   DataPoint
                     { dataPointAttributes = attributeMapToAttributes limits mempty
+                    , dataPointStartTimestamp = Just startTs
                     , dataPointTimestamp = ts
                     , dataPointValue = max 0 value
                     }
             }
-  registerMetricStream provider (MetricStream (meterName meter) collectFn)
+  registerMetricStream provider (MetricStream (meterName meter) ObservableCounterKind collectFn)
   pure $
     ObservableCounter
       { observableCounterName = name
@@ -408,6 +433,7 @@ createObservableUpDownCounter
   -> (AttributeMap -> IO Double)
   -> m (ObservableUpDownCounter Double)
 createObservableUpDownCounter meter name desc unit callback = liftIO $ do
+  startTs <- getTimestamp
   let provider = getMeterMeterProvider meter
       limits = meterProviderAttributeLimits provider
       collectFn = do
@@ -424,11 +450,12 @@ createObservableUpDownCounter meter name desc unit callback = liftIO $ do
                 V.singleton
                   DataPoint
                     { dataPointAttributes = attributeMapToAttributes limits mempty
+                    , dataPointStartTimestamp = Just startTs
                     , dataPointTimestamp = ts
                     , dataPointValue = value
                     }
             }
-  registerMetricStream provider (MetricStream (meterName meter) collectFn)
+  registerMetricStream provider (MetricStream (meterName meter) ObservableUpDownCounterKind collectFn)
   pure $
     ObservableUpDownCounter
       { observableUpDownCounterName = name
