@@ -30,6 +30,8 @@ module OpenTelemetry.Metrics (
   createHistogram,
   Gauge (..),
   createGauge,
+  ObservableGauge (..),
+  createObservableGauge,
   ObservableCounter (..),
   createObservableCounter,
   ObservableUpDownCounter (..),
