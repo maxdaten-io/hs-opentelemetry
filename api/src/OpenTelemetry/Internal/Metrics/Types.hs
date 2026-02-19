@@ -116,12 +116,23 @@ data Gauge a = Gauge
   }
 
 
+data Observation a = Observation
+  { observationValue :: !a
+  , observationAttributes :: !AttributeMap
+  }
+
+
+newtype CallbackRegistration = CallbackRegistration
+  { unregisterCallback :: IO ()
+  }
+
+
 data ObservableGauge a = ObservableGauge
   { observableGaugeName :: !Text
   , observableGaugeDescription :: !Text
   , observableGaugeUnit :: !Text
   , observableGaugeMeter :: !Meter
-  , observableGaugeCallback :: !(AttributeMap -> IO a)
+  , observableGaugeRegisterCallback :: !(IO [Observation a] -> IO CallbackRegistration)
   }
 
 
@@ -130,7 +141,7 @@ data ObservableCounter a = ObservableCounter
   , observableCounterDescription :: !Text
   , observableCounterUnit :: !Text
   , observableCounterMeter :: !Meter
-  , observableCounterCallback :: !(AttributeMap -> IO a)
+  , observableCounterRegisterCallback :: !(IO [Observation a] -> IO CallbackRegistration)
   }
 
 
@@ -139,7 +150,7 @@ data ObservableUpDownCounter a = ObservableUpDownCounter
   , observableUpDownCounterDescription :: !Text
   , observableUpDownCounterUnit :: !Text
   , observableUpDownCounterMeter :: !Meter
-  , observableUpDownCounterCallback :: !(AttributeMap -> IO a)
+  , observableUpDownCounterRegisterCallback :: !(IO [Observation a] -> IO CallbackRegistration)
   }
 
 
