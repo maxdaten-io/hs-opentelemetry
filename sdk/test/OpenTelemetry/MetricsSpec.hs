@@ -310,6 +310,20 @@ spec = describe "Metrics" $ do
     shutdownMeterProvider provider
     readIORef shutdownRef `shouldReturn` True
 
+  it "shutdown flushes pending metrics before exporter shutdown" $ do
+    (batchesRef, shutdownRef, exporter) <- mkCaptureExporter
+    reader <- manualReader exporter
+    provider <- createMeterProvider [reader] emptyMeterProviderOptions
+    meter <- getMeter provider "spec.metrics" meterOptions
+    counter <- createCounter meter "requests" "request count" "1"
+    counterAdd counter 1 mempty
+
+    shutdownMeterProvider provider
+
+    batches <- readIORef batchesRef
+    any snd batches `shouldBe` True
+    readIORef shutdownRef `shouldReturn` True
+
   it "does not allow reusing a metric reader across meter providers" $ do
     (_batchesRef, _shutdownRef, exporter) <- mkCaptureExporter
     reader <- manualReader exporter
@@ -376,6 +390,7 @@ spec = describe "Metrics" $ do
     batchesBeforeShutdown <- length <$> readIORef batchesRef
 
     shutdownMeterProvider provider
+    batchesAtShutdown <- length <$> readIORef batchesRef
 
     meterAfterShutdown <- getMeter provider "spec.metrics.after.shutdown" meterOptions
     counterAfterShutdown <- createCounter meterAfterShutdown "requests_after_shutdown" "request count" "1"
@@ -383,7 +398,8 @@ spec = describe "Metrics" $ do
     forceFlushMeterProvider provider
     batchesAfterShutdown <- length <$> readIORef batchesRef
 
-    batchesAfterShutdown `shouldBe` batchesBeforeShutdown
+    batchesAtShutdown `shouldSatisfy` (> batchesBeforeShutdown)
+    batchesAfterShutdown `shouldBe` batchesAtShutdown
 
   describe "duplicate instrument registration" $ do
     it "merges identical duplicate counters into one exported metric" $ do
@@ -547,8 +563,8 @@ spec = describe "Metrics" $ do
 
         forceFlushMeterProvider provider
         forceFlushMeterProvider provider
+        readIORef callbackCallsRef `shouldReturn` 4
 
-      readIORef callbackCallsRef `shouldReturn` 4
       exported <- secondBatch batchesRef
       gaugeMetric <- expectGaugeMetric "cpu_frequency" exported
       case gaugeMetric of
