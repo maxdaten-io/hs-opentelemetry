@@ -37,6 +37,9 @@ data MetricReader = MetricReader
 
 data MetricStream = MetricStream
   { metricStreamScope :: !InstrumentationLibrary
+  , metricStreamName :: !Text
+  , metricStreamDescription :: !Text
+  , metricStreamUnit :: !Text
   , metricStreamInstrumentKind :: !InstrumentKind
   , metricStreamCollect :: IO MetricData
   }
@@ -47,6 +50,7 @@ data MeterProvider = MeterProvider
   , meterProviderResources :: !MaterializedResources
   , meterProviderAttributeLimits :: !AttributeLimits
   , meterProviderMetricStreams :: !(IORef [MetricStream])
+  , meterProviderRegisteredInstruments :: !(IORef (HashMap (InstrumentationLibrary, Text) (InstrumentKind, Text, Text, Text)))
   , meterProviderIsShutdown :: !(IORef Bool)
   }
 
