@@ -72,6 +72,7 @@ otlpExporter conf = liftIO $ do
                     Just (SomeAsyncException _) -> throwIO err
                     Nothing -> pure $ Failure $ Just err
                 Right ok -> pure ok
+      , metricExporterForceFlush = pure ()
       , metricExporterShutdown = pure ()
       , metricExporterTemporality = metricsTemporalitySelector conf
       }
