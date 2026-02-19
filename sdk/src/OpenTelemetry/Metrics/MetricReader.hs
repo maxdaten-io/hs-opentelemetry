@@ -115,6 +115,7 @@ defaultPeriodicReaderConfig =
 periodicReader :: PeriodicReaderConfig -> MetricExporter -> IO MetricReader
 periodicReader PeriodicReaderConfig {..} exporter = do
   collectRef <- newIORef (pure (emptyMaterializedResources, []))
+  registrationRef <- newIORef False
   shutdownRef <- newIORef False
   stateRef <- newIORef emptyTemporalityState
   exportLock <- newMVar ()
@@ -128,7 +129,11 @@ periodicReader PeriodicReaderConfig {..} exporter = do
 
   pure $
     MetricReader
-      { metricReaderSetCollect = writeIORef collectRef
+      { metricReaderSetCollect = \collect -> do
+          alreadyRegistered <- atomicModifyIORef' registrationRef (\registered -> (True, registered))
+          when alreadyRegistered $
+            throwIO (userError "metric reader is already registered to a MeterProvider")
+          writeIORef collectRef collect
       , metricReaderCollect = do
           shutdown <- readIORef shutdownRef
           if shutdown
@@ -151,12 +156,17 @@ periodicReader PeriodicReaderConfig {..} exporter = do
 manualReader :: MetricExporter -> IO MetricReader
 manualReader exporter = do
   collectRef <- newIORef (pure (emptyMaterializedResources, []))
+  registrationRef <- newIORef False
   shutdownRef <- newIORef False
   stateRef <- newIORef emptyTemporalityState
   exportLock <- newMVar ()
   pure $
     MetricReader
-      { metricReaderSetCollect = writeIORef collectRef
+      { metricReaderSetCollect = \collect -> do
+          alreadyRegistered <- atomicModifyIORef' registrationRef (\registered -> (True, registered))
+          when alreadyRegistered $
+            throwIO (userError "metric reader is already registered to a MeterProvider")
+          writeIORef collectRef collect
       , metricReaderCollect = do
           shutdown <- readIORef shutdownRef
           if shutdown
