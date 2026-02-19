@@ -45,6 +45,7 @@ module OpenTelemetry.Metrics (
   InstrumentKind (..),
 ) where
 
+import Control.Monad (forM_, when)
 import Data.Either (partitionEithers)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
@@ -57,6 +58,7 @@ import OpenTelemetry.Metrics.MetricReader
 import OpenTelemetry.Resource
 import OpenTelemetry.Resource.Detector (detectBuiltInResources)
 import System.Environment (lookupEnv)
+import System.IO (hPutStrLn, stderr)
 
 
 initializeGlobalMeterProvider :: IO MeterProvider
@@ -108,11 +110,40 @@ knownMetricReaders =
 
 detectMetricReaders :: IO [MetricReader]
 detectMetricReaders = do
-  readersInEnv <- fmap (T.splitOn "," . T.pack) <$> lookupEnv "OTEL_METRICS_EXPORTER"
-  if readersInEnv == Just ["none"]
+  readersInEnv <- lookupEnv "OTEL_METRICS_EXPORTER"
+  let normalized = normalizeMetricsExporters readersInEnv
+  if normalized == Just ["none"]
     then pure []
     else do
-      let selected = fromMaybe ["otlp"] readersInEnv
+      let selected = fromMaybe ["otlp"] normalized
           initializers = map (\name -> maybe (Left name) Right (lookup name knownMetricReaders)) selected
-          (_unknown, matched) = partitionEithers initializers
-      sequence matched
+          (unknown, matched) = partitionEithers initializers
+      forM_ unknown $ \unknownName ->
+        warnMetrics $
+          "unsupported OTEL_METRICS_EXPORTER value '"
+            <> T.unpack unknownName
+            <> "', ignoring"
+      if null matched
+        then do
+          when (normalized /= Nothing) $
+            warnMetrics "no supported OTEL_METRICS_EXPORTER values selected, defaulting to 'otlp'"
+          case lookup "otlp" knownMetricReaders of
+            Nothing -> pure []
+            Just initializeDefault -> sequence [initializeDefault]
+        else sequence matched
+
+
+normalizeMetricsExporters :: Maybe String -> Maybe [T.Text]
+normalizeMetricsExporters input = do
+  raw <- input
+  let stripped = T.strip (T.pack raw)
+  if T.null stripped
+    then Nothing
+    else
+      let values = fmap (T.toLower . T.strip) (T.splitOn "," stripped)
+          nonEmpty = filter (not . T.null) values
+      in if null nonEmpty then Nothing else Just nonEmpty
+
+
+warnMetrics :: String -> IO ()
+warnMetrics = hPutStrLn stderr . ("Warning: " <>)
