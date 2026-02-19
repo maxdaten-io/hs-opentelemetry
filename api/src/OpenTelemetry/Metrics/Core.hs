@@ -148,6 +148,7 @@ shutdownMeterProvider :: (MonadIO m) => MeterProvider -> m ()
 shutdownMeterProvider MeterProvider {..} = liftIO $ do
   alreadyShutdown <- atomicModifyIORef' meterProviderIsShutdown (\shutdown -> (True, shutdown))
   unless alreadyShutdown $ do
+    mapM_ metricReaderForceFlush meterProviderMetricReaders
     jobs <- forM meterProviderMetricReaders metricReaderShutdown
     mapM_ wait jobs
 
