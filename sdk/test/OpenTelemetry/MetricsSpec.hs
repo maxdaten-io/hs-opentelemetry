@@ -644,3 +644,21 @@ spec = describe "Metrics" $ do
         conf <- OTLPConfig.loadExporterEnvironmentVariables
         OTLPConfig.otlpMetricsDefaultHistogramAggregation conf
           `shouldBe` Just OTLPConfig.MetricsExplicitBucketHistogramAggregation
+
+    it "treats OTEL_METRICS_EXPORTER as case-insensitive enum" $ do
+      withEnvVar "OTEL_SDK_DISABLED" Nothing $
+        withEnvVar "OTEL_METRICS_EXPORTER" (Just "OtLp") $ do
+          (readers, _) <- getMeterProviderInitializationOptions
+          length readers `shouldBe` 1
+
+    it "treats empty OTEL_METRICS_EXPORTER as unset" $ do
+      withEnvVar "OTEL_SDK_DISABLED" Nothing $
+        withEnvVar "OTEL_METRICS_EXPORTER" (Just "") $ do
+          (readers, _) <- getMeterProviderInitializationOptions
+          length readers `shouldBe` 1
+
+    it "ignores unknown OTEL_METRICS_EXPORTER values and falls back to default" $ do
+      withEnvVar "OTEL_SDK_DISABLED" Nothing $
+        withEnvVar "OTEL_METRICS_EXPORTER" (Just "does-not-exist") $ do
+          (readers, _) <- getMeterProviderInitializationOptions
+          length readers `shouldBe` 1
