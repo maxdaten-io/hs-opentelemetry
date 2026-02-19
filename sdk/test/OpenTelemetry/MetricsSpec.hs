@@ -244,6 +244,26 @@ spec = describe "Metrics" $ do
         lookupAttribute (getMaterializedResourcesAttributes resources) "service.name"
           `shouldBe` Just (toAttribute ("metrics-spec" :: Text))
 
+  it "applies meter schema option to instrumentation scope" $ do
+    (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+    withMeterProvider [exporter] $ \provider -> do
+      meter <-
+        getMeter
+          provider
+          "spec.metrics.scope"
+          (meterOptions {meterSchema = Just "https://opentelemetry.io/schemas/1.0.0"})
+      counter <- createCounter meter "requests" "request count" "1"
+      counterAdd counter 1 mempty
+      forceFlushMeterProvider provider
+
+    batches <- reverse <$> readIORef batchesRef
+    case batches of
+      (firstBatch : _) ->
+        case find (\scope -> libraryName scope == "spec.metrics.scope") (HashMap.keys firstBatch) of
+          Just scope -> librarySchemaUrl scope `shouldBe` "https://opentelemetry.io/schemas/1.0.0"
+          Nothing -> expectationFailure "expected exported metrics for scope spec.metrics.scope"
+      [] -> expectationFailure "expected at least one metric export batch"
+
   it "shutdown propagates to exporter" $ do
     (_batchesRef, shutdownRef, exporter) <- mkCaptureExporter
     reader <- manualReader exporter
