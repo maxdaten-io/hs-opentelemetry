@@ -137,6 +137,7 @@ test-suite hs-opentelemetry-sdk-test
       base >=4.7 && <5
     , clock
     , hs-opentelemetry-api
+    , hs-opentelemetry-exporter-otlp
     , hs-opentelemetry-exporter-in-memory
     , hs-opentelemetry-exporter-otlp ==0.1.*
     , hs-opentelemetry-otlp
