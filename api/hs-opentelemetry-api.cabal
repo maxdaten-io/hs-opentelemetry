@@ -95,6 +95,7 @@ library
     , bytestring
     , charset
     , clock
+    , containers
     , hashable
     , http-types
     , memory
