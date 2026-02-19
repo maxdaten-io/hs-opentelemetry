@@ -264,6 +264,11 @@ spec = describe "Metrics" $ do
           Nothing -> expectationFailure "expected exported metrics for scope spec.metrics.scope"
       [] -> expectationFailure "expected at least one metric export batch"
 
+  it "keeps empty meter scope names functional" $ do
+    provider <- createMeterProvider [] emptyMeterProviderOptions
+    meter <- getMeter provider "" meterOptions
+    libraryName (meterName meter) `shouldBe` ""
+
   it "shutdown propagates to exporter" $ do
     (_batchesRef, shutdownRef, exporter) <- mkCaptureExporter
     reader <- manualReader exporter
