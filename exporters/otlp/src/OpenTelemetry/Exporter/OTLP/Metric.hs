@@ -46,6 +46,11 @@ import Text.Read (readMaybe)
 
 otlpExporter :: (MonadIO m) => OTLPExporterConfig -> m MetricExporter
 otlpExporter conf = liftIO $ do
+  case fromMaybe MetricsExplicitBucketHistogramAggregation (otlpMetricsDefaultHistogramAggregation conf) of
+    MetricsExplicitBucketHistogramAggregation -> pure ()
+    MetricsBase2ExponentialBucketHistogramAggregation ->
+      putWarningLn
+        "Warning: base2_exponential_bucket_histogram is not yet supported by this SDK; falling back to explicit_bucket_histogram"
   req <- parseRequest (otlpSignalEndpoint conf MetricsSignal)
   let (encodingHeaders, encoder) = httpCompressionForSignal conf MetricsSignal
   let baseReq =
