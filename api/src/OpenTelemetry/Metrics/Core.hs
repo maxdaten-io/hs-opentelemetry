@@ -57,8 +57,8 @@ import Control.Monad (forM, forM_, unless, when)
 import Control.Monad.IO.Class
 import qualified Data.HashMap.Strict as H
 import Data.IORef
-import Data.List (foldl')
 import qualified Data.IntMap.Strict as IntMap
+import Data.List (foldl')
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -148,6 +148,7 @@ shutdownMeterProvider :: (MonadIO m) => MeterProvider -> m ()
 shutdownMeterProvider MeterProvider {..} = liftIO $ do
   alreadyShutdown <- atomicModifyIORef' meterProviderIsShutdown (\shutdown -> (True, shutdown))
   unless alreadyShutdown $ do
+    mapM_ metricReaderForceFlush meterProviderMetricReaders
     jobs <- forM meterProviderMetricReaders metricReaderShutdown
     mapM_ wait jobs
 
