@@ -70,6 +70,23 @@ spec = describe "Core" $ do
           [ ("anotherThing", "another thing")
           , ("something", "a thing")
           ]
+    it "applies attribute length limits" $ do
+      let lp =
+            createLoggerProvider [] $
+              LoggerProviderOptions
+                { loggerProviderOptionsResources = emptyMaterializedResources
+                , loggerProviderOptionsAttributeLimits =
+                    LA.AttributeLimits
+                      { attributeCountLimit = Nothing
+                      , attributeLengthLimit = Just 5
+                      }
+                }
+          l = makeLogger lp InstrumentationLibrary {libraryName = "exampleLibrary", libraryVersion = "", librarySchemaUrl = "", libraryAttributes = A.emptyAttributes}
+      lr <- emitLogRecord l emptyLogRecordArguments
+      addAttribute lr "tooLong" ("this value is too long" :: LA.AnyValue)
+
+      (_, attrs) <- LA.getAttributeMap <$> logRecordGetAttributes lr
+      attrs `shouldBe` H.fromList [("tooLong", "this ")]
   describe "addAttributes" $ do
     it "works" $ do
       lp <- getGlobalLoggerProvider
@@ -88,4 +105,30 @@ spec = describe "Core" $ do
           [ ("anotherThing", "another thing")
           , ("something", "a thing")
           , ("twoThing", "the second another thing")
+          ]
+    it "applies attribute length limits in bulk updates" $ do
+      let lp =
+            createLoggerProvider [] $
+              LoggerProviderOptions
+                { loggerProviderOptionsResources = emptyMaterializedResources
+                , loggerProviderOptionsAttributeLimits =
+                    LA.AttributeLimits
+                      { attributeCountLimit = Nothing
+                      , attributeLengthLimit = Just 4
+                      }
+                }
+          l = makeLogger lp InstrumentationLibrary {libraryName = "exampleLibrary", libraryVersion = "", librarySchemaUrl = "", libraryAttributes = A.emptyAttributes}
+      lr <- emitLogRecord l emptyLogRecordArguments
+
+      addAttributes lr $
+        H.fromList
+          [ ("tooLongA", "abcdef" :: LA.AnyValue)
+          , ("tooLongB", "wxyz123")
+          ]
+
+      (_, attrs) <- LA.getAttributeMap <$> logRecordGetAttributes lr
+      attrs
+        `shouldBe` H.fromList
+          [ ("tooLongA", "abcd")
+          , ("tooLongB", "wxyz")
           ]
