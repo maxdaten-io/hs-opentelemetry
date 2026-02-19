@@ -156,7 +156,6 @@ httpOtlpExporter conf = do
             else
               if statusCode (responseStatus resp) >= 300
                 then do
-                  print resp
                   pure $ Failure Nothing
                 else pure Success
 
