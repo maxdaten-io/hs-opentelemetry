@@ -123,7 +123,7 @@ periodicReader PeriodicReaderConfig {..} exporter = do
     stopped <- readTVarIO stopSignal
     unless stopped $ do
       collect <- readIORef collectRef
-      runSynchronizedExport exportLock stateRef exporter collect
+      runSynchronizedExportWithTimeout (Just periodicReaderTimeout) exportLock stateRef exporter collect
 
   pure $
     MetricReader
@@ -131,7 +131,7 @@ periodicReader PeriodicReaderConfig {..} exporter = do
       , metricReaderCollect = join (readIORef collectRef)
       , metricReaderForceFlush = do
           collect <- readIORef collectRef
-          runSynchronizedExport exportLock stateRef exporter collect
+          runSynchronizedExportWithTimeout (Just periodicReaderTimeout) exportLock stateRef exporter collect
       , metricReaderShutdown = async $ do
           atomically $ writeTVar stopSignal True
           cancel worker
@@ -151,21 +151,30 @@ manualReader exporter = do
       , metricReaderCollect = join (readIORef collectRef)
       , metricReaderForceFlush = do
           collect <- readIORef collectRef
-          runSynchronizedExport exportLock stateRef exporter collect
+          runSynchronizedExportWithTimeout Nothing exportLock stateRef exporter collect
       , metricReaderShutdown = async $ do
           metricExporterShutdown exporter
           pure ShutdownSuccess
       }
 
 
-runSynchronizedExport
-  :: MVar ()
+runSynchronizedExportWithTimeout
+  :: Maybe Int
+  -> MVar ()
   -> IORef TemporalityState
   -> MetricExporter
   -> IO (MaterializedResources, [ScopeMetrics])
   -> IO ()
-runSynchronizedExport exportLock stateRef exporter collect =
-  withMVar exportLock (\_ -> runExport stateRef exporter collect)
+runSynchronizedExportWithTimeout timeoutMs exportLock stateRef exporter collect =
+  withMVar exportLock $ \_ -> do
+    let exportAction = runExport stateRef exporter collect
+    case timeoutMs of
+      Nothing -> exportAction
+      Just ms
+        | ms <= 0 -> exportAction
+        | otherwise -> do
+            _ <- race (threadDelay (ms * 1000)) exportAction
+            pure ()
 
 
 runExport :: IORef TemporalityState -> MetricExporter -> IO (MaterializedResources, [ScopeMetrics]) -> IO ()
