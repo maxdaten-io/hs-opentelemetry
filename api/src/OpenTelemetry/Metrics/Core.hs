@@ -58,7 +58,7 @@ import Control.Monad.IO.Class
 import qualified Data.HashMap.Strict as H
 import Data.IORef
 import qualified Data.IntMap.Strict as IntMap
-import Data.List (foldl')
+import qualified Data.List as List
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -252,7 +252,7 @@ mergeScopeMetrics scopeMetrics@ScopeMetrics {scopeMetricsMetrics, scopeMetricsIn
   | otherwise =
       let pairs = zip (V.toList scopeMetricsInstrumentKinds) (V.toList scopeMetricsMetrics)
           (_, mergedPairs) =
-            foldl'
+            List.foldl'
               ( \(indexMap, acc) pair@(kind, metricData) ->
                   let identity = metricIdentity kind metricData
                   in case H.lookup identity indexMap of
@@ -301,7 +301,7 @@ mergeSumPoints :: V.Vector (DataPoint Double) -> V.Vector (DataPoint Double) -> 
 mergeSumPoints left right =
   V.fromList $
     H.elems $
-      foldl'
+      List.foldl'
         ( \acc point@DataPoint {dataPointAttributes} ->
             H.insertWith
               combine
@@ -324,7 +324,7 @@ mergeGaugePoints :: V.Vector (DataPoint Double) -> V.Vector (DataPoint Double) -
 mergeGaugePoints left right =
   V.fromList $
     H.elems $
-      foldl'
+      List.foldl'
         ( \acc point@DataPoint {dataPointAttributes} ->
             H.insertWith
               combine
@@ -344,7 +344,7 @@ mergeHistogramPoints :: V.Vector HistogramDataPoint -> V.Vector HistogramDataPoi
 mergeHistogramPoints left right =
   V.fromList $
     H.elems $
-      foldl'
+      List.foldl'
         ( \acc point@HistogramDataPoint {histogramDataPointAttributes, histogramDataPointExplicitBounds} ->
             H.insertWith
               combine
@@ -659,7 +659,7 @@ createObservableGauge meter name desc unit callbacks = liftIO $ do
         ts <- getTimestamp
         observations <- collectCallbackObservations callbackRegistry
         let values =
-              foldl'
+              List.foldl'
                 (\m Observation {observationValue, observationAttributes} -> H.insert observationAttributes observationValue m)
                 H.empty
                 observations
@@ -713,7 +713,7 @@ createObservableCounter meter name desc unit callbacks = liftIO $ do
         ts <- getTimestamp
         observations <- collectCallbackObservations callbackRegistry
         let values =
-              foldl'
+              List.foldl'
                 ( \m Observation {observationValue, observationAttributes} ->
                     H.insert observationAttributes (max 0 observationValue) m
                 )
@@ -771,7 +771,7 @@ createObservableUpDownCounter meter name desc unit callbacks = liftIO $ do
         ts <- getTimestamp
         observations <- collectCallbackObservations callbackRegistry
         let values =
-              foldl'
+              List.foldl'
                 (\m Observation {observationValue, observationAttributes} -> H.insert observationAttributes observationValue m)
                 H.empty
                 observations

@@ -19,7 +19,7 @@ import Control.Monad (foldM, forever, join, unless, when)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.IORef
-import Data.List (foldl')
+import qualified Data.List as List
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Vector (Vector)
@@ -258,7 +258,7 @@ convertScopeMetrics selector initialState ScopeMetrics {scopeMetricsScope, scope
   | otherwise =
       let pairs = zip (Vector.toList scopeMetricsInstrumentKinds) (Vector.toList scopeMetricsMetrics)
           (nextState, revConverted) =
-            foldl'
+            List.foldl'
               ( \(state, acc) (kind, metricData) ->
                   let (state', convertedMetricData) = convertMetric selector scopeMetricsScope kind metricData state
                   in (state', convertedMetricData : acc)
@@ -293,7 +293,7 @@ convertSumData
   -> (TemporalityState, MetricData)
 convertSumData targetTemporality scope kind sumData@SumData {..} state =
   let (updatedSums, revPoints) =
-        foldl'
+        List.foldl'
           ( \(!sums, acc) point@DataPoint {dataPointAttributes, dataPointTimestamp, dataPointStartTimestamp, dataPointValue} ->
               let key = (scope, kind, sumName, sumDescription, sumUnit, sumIsMonotonic, dataPointAttributes)
                   series0 =
@@ -388,7 +388,7 @@ convertHistogramData
   -> (TemporalityState, MetricData)
 convertHistogramData targetTemporality scope kind histogramData@HistogramData {..} state =
   let (updatedHistograms, revPoints) =
-        foldl'
+        List.foldl'
           ( \(!histograms, acc) point@HistogramDataPoint {histogramDataPointAttributes, histogramDataPointExplicitBounds, histogramDataPointTimestamp, histogramDataPointStartTimestamp} ->
               let key =
                     ( scope
@@ -495,7 +495,7 @@ convertGaugeData
   -> (TemporalityState, MetricData)
 convertGaugeData targetTemporality scope kind gaugeData@GaugeData {..} state =
   let (updatedGauges, revPoints) =
-        foldl'
+        List.foldl'
           ( \(!gauges, acc) point@DataPoint {dataPointAttributes, dataPointTimestamp, dataPointStartTimestamp} ->
               let key = (scope, kind, gaugeName, gaugeDescription, gaugeUnit, dataPointAttributes)
                   series0 =
