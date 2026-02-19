@@ -23,6 +23,7 @@ import OpenTelemetry.Metrics.Core (
   HistogramDataPoint (..),
   MeterProvider,
   MetricData (..),
+  MetricReader (..),
   forceFlushMeterProvider,
  )
 import OpenTelemetry.Metrics.MetricReader (PeriodicReaderConfig (..), manualReader, periodicReader)
@@ -48,6 +49,7 @@ mkCaptureExporter = do
               let hasMetrics = any (not . null) byScope
               modifyIORef' batchesRef ((resources, hasMetrics) :)
               pure Success
+          , metricExporterForceFlush = pure ()
           , metricExporterShutdown = writeIORef shutdownRef True
           , metricExporterTemporality = const CumulativeTemporality
           }
@@ -64,6 +66,7 @@ mkTemporalityCaptureExporter temporalitySelector = do
           { metricExporterExport = \_resources byScope -> do
               modifyIORef' batchesRef (byScope :)
               pure Success
+          , metricExporterForceFlush = pure ()
           , metricExporterShutdown = pure ()
           , metricExporterTemporality = temporalitySelector
           }
@@ -85,6 +88,7 @@ mkFlakyTemporalityCaptureExporter temporalitySelector = do
               if callCount == 0
                 then pure (Failure Nothing)
                 else pure Success
+          , metricExporterForceFlush = pure ()
           , metricExporterShutdown = pure ()
           , metricExporterTemporality = temporalitySelector
           }
@@ -235,6 +239,53 @@ spec = describe "Metrics" $ do
 
     shutdownMeterProvider provider
     readIORef shutdownRef `shouldReturn` True
+
+  it "manual reader collect fails after shutdown" $ do
+    (_batchesRef, _shutdownRef, exporter) <- mkCaptureExporter
+    reader <- manualReader exporter
+    _ <- metricReaderShutdown reader
+    threadDelay 10000
+
+    metricReaderCollect reader `shouldThrow` anyException
+
+  it "force flush delegates to exporter force flush" $ do
+    flushCountRef <- newIORef (0 :: Int)
+    let exporter =
+          MetricExporter
+            { metricExporterExport = \_resources _byScope -> pure Success
+            , metricExporterForceFlush = modifyIORef' flushCountRef (+ 1)
+            , metricExporterShutdown = pure ()
+            , metricExporterTemporality = const CumulativeTemporality
+            }
+    reader <- manualReader exporter
+    provider <- createMeterProvider [reader] emptyMeterProviderOptions
+    meter <- getMeter provider "spec.metrics" meterOptions
+    counter <- createCounter meter "requests" "request count" "1"
+    counterAdd counter 1 mempty
+    forceFlushMeterProvider provider
+
+    readIORef flushCountRef `shouldReturn` 1
+
+  it "meters created after provider shutdown are no-op" $ do
+    (batchesRef, _shutdownRef, exporter) <- mkCaptureExporter
+    reader <- manualReader exporter
+    provider <- createMeterProvider [reader] emptyMeterProviderOptions
+
+    meter <- getMeter provider "spec.metrics" meterOptions
+    counter <- createCounter meter "requests" "request count" "1"
+    counterAdd counter 1 mempty
+    forceFlushMeterProvider provider
+    batchesBeforeShutdown <- length <$> readIORef batchesRef
+
+    shutdownMeterProvider provider
+
+    meterAfterShutdown <- getMeter provider "spec.metrics.after.shutdown" meterOptions
+    counterAfterShutdown <- createCounter meterAfterShutdown "requests_after_shutdown" "request count" "1"
+    counterAdd counterAfterShutdown 10 mempty
+    forceFlushMeterProvider provider
+    batchesAfterShutdown <- length <$> readIORef batchesRef
+
+    batchesAfterShutdown `shouldBe` batchesBeforeShutdown
 
   describe "gauge instruments" $ do
     it "records synchronous gauge values via gaugeRecord" $ do
@@ -538,6 +589,7 @@ spec = describe "Metrics" $ do
                   threadDelay 100000
                   atomicModifyIORef' activeExports (\n -> (n - 1, ()))
                   pure Success
+              , metricExporterForceFlush = pure ()
               , metricExporterShutdown = pure ()
               , metricExporterTemporality = const CumulativeTemporality
               }
@@ -573,6 +625,7 @@ spec = describe "Metrics" $ do
               { metricExporterExport = \_resources _byScope -> do
                   threadDelay 200000
                   pure Success
+              , metricExporterForceFlush = pure ()
               , metricExporterShutdown = pure ()
               , metricExporterTemporality = const CumulativeTemporality
               }

@@ -15,7 +15,7 @@ import Control.Concurrent.Async
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM
 import Control.Exception (throwIO)
-import Control.Monad (foldM, forever, join, unless)
+import Control.Monad (foldM, forever, join, unless, when)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.IORef
@@ -115,6 +115,7 @@ defaultPeriodicReaderConfig =
 periodicReader :: PeriodicReaderConfig -> MetricExporter -> IO MetricReader
 periodicReader PeriodicReaderConfig {..} exporter = do
   collectRef <- newIORef (pure (emptyMaterializedResources, []))
+  shutdownRef <- newIORef False
   stateRef <- newIORef emptyTemporalityState
   exportLock <- newMVar ()
   stopSignal <- newTVarIO False
@@ -123,16 +124,23 @@ periodicReader PeriodicReaderConfig {..} exporter = do
     stopped <- readTVarIO stopSignal
     unless stopped $ do
       collect <- readIORef collectRef
-      runSynchronizedExportWithTimeout (Just periodicReaderTimeout) exportLock stateRef exporter collect
+      runSynchronizedExportWithTimeout (Just periodicReaderTimeout) False exportLock stateRef exporter collect
 
   pure $
     MetricReader
       { metricReaderSetCollect = writeIORef collectRef
-      , metricReaderCollect = join (readIORef collectRef)
+      , metricReaderCollect = do
+          shutdown <- readIORef shutdownRef
+          if shutdown
+            then throwIO (userError "metric reader is shut down")
+            else join (readIORef collectRef)
       , metricReaderForceFlush = do
-          collect <- readIORef collectRef
-          runSynchronizedExportWithTimeout (Just periodicReaderTimeout) exportLock stateRef exporter collect
+          shutdown <- readIORef shutdownRef
+          unless shutdown $ do
+            collect <- readIORef collectRef
+            runSynchronizedExportWithTimeout (Just periodicReaderTimeout) True exportLock stateRef exporter collect
       , metricReaderShutdown = async $ do
+          writeIORef shutdownRef True
           atomically $ writeTVar stopSignal True
           cancel worker
           metricExporterShutdown exporter
@@ -143,16 +151,24 @@ periodicReader PeriodicReaderConfig {..} exporter = do
 manualReader :: MetricExporter -> IO MetricReader
 manualReader exporter = do
   collectRef <- newIORef (pure (emptyMaterializedResources, []))
+  shutdownRef <- newIORef False
   stateRef <- newIORef emptyTemporalityState
   exportLock <- newMVar ()
   pure $
     MetricReader
       { metricReaderSetCollect = writeIORef collectRef
-      , metricReaderCollect = join (readIORef collectRef)
+      , metricReaderCollect = do
+          shutdown <- readIORef shutdownRef
+          if shutdown
+            then throwIO (userError "metric reader is shut down")
+            else join (readIORef collectRef)
       , metricReaderForceFlush = do
-          collect <- readIORef collectRef
-          runSynchronizedExportWithTimeout Nothing exportLock stateRef exporter collect
+          shutdown <- readIORef shutdownRef
+          unless shutdown $ do
+            collect <- readIORef collectRef
+            runSynchronizedExportWithTimeout Nothing True exportLock stateRef exporter collect
       , metricReaderShutdown = async $ do
+          writeIORef shutdownRef True
           metricExporterShutdown exporter
           pure ShutdownSuccess
       }
@@ -160,14 +176,15 @@ manualReader exporter = do
 
 runSynchronizedExportWithTimeout
   :: Maybe Int
+  -> Bool
   -> MVar ()
   -> IORef TemporalityState
   -> MetricExporter
   -> IO (MaterializedResources, [ScopeMetrics])
   -> IO ()
-runSynchronizedExportWithTimeout timeoutMs exportLock stateRef exporter collect =
+runSynchronizedExportWithTimeout timeoutMs shouldForceFlush exportLock stateRef exporter collect =
   withMVar exportLock $ \_ -> do
-    let exportAction = runExport stateRef exporter collect
+    let exportAction = runExport stateRef shouldForceFlush exporter collect
     case timeoutMs of
       Nothing -> exportAction
       Just ms
@@ -177,11 +194,12 @@ runSynchronizedExportWithTimeout timeoutMs exportLock stateRef exporter collect 
             pure ()
 
 
-runExport :: IORef TemporalityState -> MetricExporter -> IO (MaterializedResources, [ScopeMetrics]) -> IO ()
-runExport stateRef exporter collect = do
+runExport :: IORef TemporalityState -> Bool -> MetricExporter -> IO (MaterializedResources, [ScopeMetrics]) -> IO ()
+runExport stateRef shouldForceFlush exporter collect = do
   (resources, scopeMetrics) <- collect
   byScope <- prepareExportBatch stateRef (metricExporterTemporality exporter) scopeMetrics
   _ <- metricExporterExport exporter resources byScope
+  when shouldForceFlush (metricExporterForceFlush exporter)
   pure ()
 
 

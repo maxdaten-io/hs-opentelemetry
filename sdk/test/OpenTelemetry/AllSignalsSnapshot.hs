@@ -171,6 +171,7 @@ mkCaptureMetricExporter = do
                       ]
               modifyIORef' batchesRef ((resources, capturedScopes) :)
               pure Success
+          , metricExporterForceFlush = pure ()
           , metricExporterShutdown = pure ()
           , metricExporterTemporality = const CumulativeTemporality
           }
