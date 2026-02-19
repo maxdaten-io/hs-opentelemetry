@@ -25,9 +25,10 @@ import OpenTelemetry.Metrics.Core (
   MetricData (..),
   forceFlushMeterProvider,
  )
-import OpenTelemetry.Metrics.MetricReader (manualReader)
+import OpenTelemetry.Metrics.MetricReader (PeriodicReaderConfig (..), manualReader, periodicReader)
 import OpenTelemetry.Resource
 import System.Environment (lookupEnv, setEnv, unsetEnv)
+import System.Timeout (timeout)
 import Test.Hspec
 
 
@@ -447,3 +448,28 @@ spec = describe "Metrics" $ do
         metricExporterTemporality exporter HistogramKind `shouldBe` DeltaTemporality
         metricExporterTemporality exporter ObservableCounterKind `shouldBe` CumulativeTemporality
         metricExporterTemporality exporter UpDownCounterKind `shouldBe` CumulativeTemporality
+
+    it "applies periodic reader timeout to force flush exports" $ do
+      let exporter =
+            MetricExporter
+              { metricExporterExport = \_resources _byScope -> do
+                  threadDelay 200000
+                  pure Success
+              , metricExporterShutdown = pure ()
+              , metricExporterTemporality = const CumulativeTemporality
+              }
+      reader <- periodicReader (PeriodicReaderConfig 60000 20) exporter
+      provider <- createMeterProvider [reader] emptyMeterProviderOptions
+      meter <- getMeter provider "spec.metrics.temporality" meterOptions
+      counter <- createCounter meter "requests_total" "requests" "1"
+      counterAdd counter 1 mempty
+
+      result <- timeout 100000 (forceFlushMeterProvider provider)
+      shutdownMeterProvider provider
+      result `shouldSatisfy` maybe False (const True)
+
+    it "loads OTLP histogram aggregation preference from environment" $ do
+      withEnvVar "OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION" (Just "explicit_bucket_histogram") $ do
+        conf <- OTLPConfig.loadExporterEnvironmentVariables
+        OTLPConfig.otlpMetricsDefaultHistogramAggregation conf
+          `shouldBe` Just OTLPConfig.MetricsExplicitBucketHistogramAggregation

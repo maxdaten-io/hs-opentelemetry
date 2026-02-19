@@ -60,6 +60,7 @@ data OTLPExporterConfig = OTLPExporterConfig
   , otlpMetricsProtocol :: Maybe Protocol
   , otlpLogsProtocol :: Maybe Protocol
   , otlpMetricsTemporalityPreference :: Maybe MetricsTemporalityPreference
+  , otlpMetricsDefaultHistogramAggregation :: Maybe MetricsDefaultHistogramAggregation
   }
 
 
@@ -95,6 +96,7 @@ loadExporterEnvironmentVariables = liftIO $ do
     <*> (traverse readProtocol =<< lookupEnv "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL")
     <*> (traverse readProtocol =<< lookupEnv "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL")
     <*> (traverse readMetricsTemporalityPreference =<< lookupEnv "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE")
+    <*> (traverse readMetricsDefaultHistogramAggregation =<< lookupEnv "OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION")
   where
     decodeHeaders hsString = case Baggage.decodeBaggageHeader $ ByteString.pack hsString of
       Left _ -> mempty
@@ -167,6 +169,30 @@ readMetricsTemporalityPreference pref =
           <> pref
           <> "', defaulting to cumulative"
       pure MetricsTemporalityCumulative
+
+
+data MetricsDefaultHistogramAggregation
+  = MetricsExplicitBucketHistogramAggregation
+  | MetricsBase2ExponentialBucketHistogramAggregation
+  deriving (Show, Eq)
+
+
+readMetricsDefaultHistogramAggregation
+  :: (MonadIO m)
+  => String
+  -> m MetricsDefaultHistogramAggregation
+readMetricsDefaultHistogramAggregation agg =
+  agg & fmap toLower & \case
+    "explicit_bucket_histogram" ->
+      pure MetricsExplicitBucketHistogramAggregation
+    "base2_exponential_bucket_histogram" ->
+      pure MetricsBase2ExponentialBucketHistogramAggregation
+    _ -> do
+      putWarningLn $
+        "Warning: unsupported metrics default histogram aggregation '"
+          <> agg
+          <> "', defaulting to explicit_bucket_histogram"
+      pure MetricsExplicitBucketHistogramAggregation
 
 
 {- |
