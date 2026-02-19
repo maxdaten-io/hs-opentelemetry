@@ -30,6 +30,8 @@ module OpenTelemetry.Metrics (
   createHistogram,
   Gauge (..),
   createGauge,
+  ObservableGauge (..),
+  createObservableGauge,
   ObservableCounter (..),
   createObservableCounter,
   ObservableUpDownCounter (..),
@@ -89,7 +91,8 @@ getMeterProviderInitializationOptions = do
 
 knownMetricReaders :: [(T.Text, IO MetricReader)]
 knownMetricReaders =
-  [ ( "otlp"
+  [
+    ( "otlp"
     , do
         conf <- loadExporterEnvironmentVariables
         exporter <- OTLPMetric.otlpExporter conf

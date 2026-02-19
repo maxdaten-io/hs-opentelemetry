@@ -112,7 +112,16 @@ data Gauge a = Gauge
   , gaugeDescription :: !Text
   , gaugeUnit :: !Text
   , gaugeMeter :: !Meter
-  , gaugeCallback :: !(AttributeMap -> IO a)
+  , gaugeRecord :: !(a -> AttributeMap -> IO ())
+  }
+
+
+data ObservableGauge a = ObservableGauge
+  { observableGaugeName :: !Text
+  , observableGaugeDescription :: !Text
+  , observableGaugeUnit :: !Text
+  , observableGaugeMeter :: !Meter
+  , observableGaugeCallback :: !(AttributeMap -> IO a)
   }
 
 

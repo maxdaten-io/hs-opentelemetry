@@ -13,6 +13,8 @@ event="standalone.event" | severity_number=Info | severity_text="INFO" | timesta
 [metrics]
 batch=1 resource=[deployment.environment.name="snapshot",service.name="hs-opentelemetry-sdk-all-signals",service.version="1.0.0-test"]
 scope="snapshot-meter" version="" schema="" attrs=[]
+metric=gauge name="cpu_frequency" unit="GHz"
+  point attrs=[] ts=<ts> value=3.4
 metric=gauge name="temperature_gauge" unit="c"
   point attrs=[] ts=<ts> value=21.5
 metric=histogram name="request_latency_ms" unit="ms" temporality=CumulativeTemporality

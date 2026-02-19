@@ -32,6 +32,8 @@ module OpenTelemetry.Metrics.Core (
   createHistogram,
   Gauge (..),
   createGauge,
+  ObservableGauge (..),
+  createObservableGauge,
   ObservableCounter (..),
   createObservableCounter,
   ObservableUpDownCounter (..),
@@ -349,8 +351,51 @@ createHistogram meter name desc unit = liftIO $ do
       }
 
 
-createGauge :: (MonadIO m) => Meter -> Text -> Text -> Text -> (AttributeMap -> IO Double) -> m (Gauge Double)
-createGauge meter name desc unit callback = liftIO $ do
+createGauge :: (MonadIO m) => Meter -> Text -> Text -> Text -> m (Gauge Double)
+createGauge meter name desc unit = liftIO $ do
+  valuesRef <- newIORef H.empty
+  let provider = getMeterMeterProvider meter
+      limits = meterProviderAttributeLimits provider
+      recordFn value attrs = atomicModifyIORef' valuesRef (\m -> (H.insert attrs value m, ()))
+      collectFn = do
+        ts <- getTimestamp
+        values <- readIORef valuesRef
+        pure $
+          GaugeData
+            { gaugeName = name
+            , gaugeDescription = desc
+            , gaugeUnit = unit
+            , gaugeDataPoints =
+                V.fromList
+                  [ DataPoint
+                    { dataPointAttributes = attributeMapToAttributes limits attrs
+                    , dataPointStartTimestamp = Nothing
+                    , dataPointTimestamp = ts
+                    , dataPointValue = value
+                    }
+                  | (attrs, value) <- H.toList values
+                  ]
+            }
+  registerMetricStream provider (MetricStream (meterName meter) GaugeKind collectFn)
+  pure $
+    Gauge
+      { gaugeName = name
+      , gaugeDescription = desc
+      , gaugeUnit = unit
+      , gaugeMeter = meter
+      , gaugeRecord = recordFn
+      }
+
+
+createObservableGauge
+  :: (MonadIO m)
+  => Meter
+  -> Text
+  -> Text
+  -> Text
+  -> (AttributeMap -> IO Double)
+  -> m (ObservableGauge Double)
+createObservableGauge meter name desc unit callback = liftIO $ do
   startTs <- getTimestamp
   let provider = getMeterMeterProvider meter
       limits = meterProviderAttributeLimits provider
@@ -371,14 +416,14 @@ createGauge meter name desc unit callback = liftIO $ do
                     , dataPointValue = value
                     }
             }
-  registerMetricStream provider (MetricStream (meterName meter) GaugeKind collectFn)
+  registerMetricStream provider (MetricStream (meterName meter) ObservableGaugeKind collectFn)
   pure $
-    Gauge
-      { gaugeName = name
-      , gaugeDescription = desc
-      , gaugeUnit = unit
-      , gaugeMeter = meter
-      , gaugeCallback = callback
+    ObservableGauge
+      { observableGaugeName = name
+      , observableGaugeDescription = desc
+      , observableGaugeUnit = unit
+      , observableGaugeMeter = meter
+      , observableGaugeCallback = callback
       }
 
 

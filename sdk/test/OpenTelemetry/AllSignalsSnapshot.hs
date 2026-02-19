@@ -149,8 +149,10 @@ emitMetrics meter = do
   histogram <- Metrics.createHistogram meter "request_latency_ms" "Request latency" "ms"
   Metrics.histogramRecord histogram 42 [("endpoint", toAttribute ("/api" :: Text))]
 
-  _ <- Metrics.createGauge meter "temperature_gauge" "Temperature" "c" (\_ -> pure 21.5)
+  gauge <- Metrics.createGauge meter "temperature_gauge" "Temperature" "c"
+  Metrics.gaugeRecord gauge 21.5 mempty
   _ <- Metrics.createObservableCounter meter "workers_total" "Workers" "1" (\_ -> pure 7.0)
+  _ <- Metrics.createObservableGauge meter "cpu_frequency" "CPU frequency" "GHz" (\_ -> pure 3.4)
   _ <- Metrics.createObservableUpDownCounter meter "pressure_level" "Pressure" "1" (\_ -> pure (-1.5))
   pure ()
 
