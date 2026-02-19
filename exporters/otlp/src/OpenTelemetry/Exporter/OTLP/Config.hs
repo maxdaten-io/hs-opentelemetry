@@ -59,6 +59,7 @@ data OTLPExporterConfig = OTLPExporterConfig
   , otlpTracesProtocol :: Maybe Protocol
   , otlpMetricsProtocol :: Maybe Protocol
   , otlpLogsProtocol :: Maybe Protocol
+  , otlpMetricsTemporalityPreference :: Maybe MetricsTemporalityPreference
   }
 
 
@@ -93,6 +94,7 @@ loadExporterEnvironmentVariables = liftIO $ do
     <*> (traverse readProtocol =<< lookupEnv "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL")
     <*> (traverse readProtocol =<< lookupEnv "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL")
     <*> (traverse readProtocol =<< lookupEnv "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL")
+    <*> (traverse readMetricsTemporalityPreference =<< lookupEnv "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE")
   where
     decodeHeaders hsString = case Baggage.decodeBaggageHeader $ ByteString.pack hsString of
       Left _ -> mempty
@@ -144,6 +146,27 @@ readProtocol protocol =
     _ -> do
       putWarningLn $ "Warning: unsupported protocol '" <> protocol <> "'"
       pure HttpProtobuf
+
+
+data MetricsTemporalityPreference
+  = MetricsTemporalityCumulative
+  | MetricsTemporalityDelta
+  | MetricsTemporalityLowMemory
+  deriving (Show, Eq)
+
+
+readMetricsTemporalityPreference :: (MonadIO m) => String -> m MetricsTemporalityPreference
+readMetricsTemporalityPreference pref =
+  pref & fmap toLower & \case
+    "cumulative" -> pure MetricsTemporalityCumulative
+    "delta" -> pure MetricsTemporalityDelta
+    "lowmemory" -> pure MetricsTemporalityLowMemory
+    _ -> do
+      putWarningLn $
+        "Warning: unsupported metrics temporality preference '"
+          <> pref
+          <> "', defaulting to cumulative"
+      pure MetricsTemporalityCumulative
 
 
 {- |
