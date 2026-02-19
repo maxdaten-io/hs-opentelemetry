@@ -112,9 +112,13 @@ detectMetricReaders :: IO [MetricReader]
 detectMetricReaders = do
   readersInEnv <- lookupEnv "OTEL_METRICS_EXPORTER"
   let normalized = normalizeMetricsExporters readersInEnv
-  if normalized == Just ["none"]
-    then pure []
-    else do
+  case normalized of
+    Just selected
+      | "none" `elem` selected -> do
+          when (selected /= ["none"]) $
+            warnMetrics "OTEL_METRICS_EXPORTER contains 'none' with other values; disabling all metrics exporters"
+          pure []
+    _ -> do
       let selected = fromMaybe ["otlp"] normalized
           initializers = map (\name -> maybe (Left name) Right (lookup name knownMetricReaders)) selected
           (unknown, matched) = partitionEithers initializers
