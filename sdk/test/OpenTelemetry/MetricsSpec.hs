@@ -124,6 +124,16 @@ expectHistogramMetric metricName batch =
     isTargetMetric _ = False
 
 
+expectGaugeMetric :: Text -> MetricExportBatch -> IO MetricData
+expectGaugeMetric metricName batch =
+  case find isTargetMetric (flattenMetrics batch) of
+    Just metricData -> pure metricData
+    Nothing -> failSpec ("expected gauge metric named " <> show metricName)
+  where
+    isTargetMetric GaugeData {gaugeName} = gaugeName == metricName
+    isTargetMetric _ = False
+
+
 singleSumPointValue :: MetricData -> IO Double
 singleSumPointValue SumData {sumDataPoints} =
   case Vector.toList sumDataPoints of
@@ -146,6 +156,14 @@ singleHistogramPoint HistogramData {histogramDataPoints} =
     [point] -> pure point
     points -> failSpec ("expected exactly one histogram point, got " <> show (length points))
 singleHistogramPoint metricData = failSpec ("expected histogram metric, got " <> show metricData)
+
+
+singleGaugePointValue :: MetricData -> IO Double
+singleGaugePointValue GaugeData {gaugeDataPoints} =
+  case Vector.toList gaugeDataPoints of
+    [DataPoint {dataPointValue}] -> pure dataPointValue
+    points -> failSpec ("expected exactly one gauge point, got " <> show (length points))
+singleGaugePointValue metricData = failSpec ("expected gauge metric, got " <> show metricData)
 
 
 secondBatch :: IORef [MetricExportBatch] -> IO MetricExportBatch
@@ -217,6 +235,38 @@ spec = describe "Metrics" $ do
 
     shutdownMeterProvider provider
     readIORef shutdownRef `shouldReturn` True
+
+  describe "gauge instruments" $ do
+    it "records synchronous gauge values via gaugeRecord" $ do
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.gauge" meterOptions
+        gauge <- createGauge meter "temperature" "temperature" "c"
+        gaugeRecord gauge 21.2 mempty
+        gaugeRecord gauge 22.8 mempty
+        forceFlushMeterProvider provider
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      gaugeMetric <- expectGaugeMetric "temperature" exported
+      singleGaugePointValue gaugeMetric `shouldReturn` 22.8
+
+    it "exports asynchronous observable gauge callback value" $ do
+      gaugeValueRef <- newIORef 3.5
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.gauge" meterOptions
+        _ <- createObservableGauge meter "cpu_frequency" "cpu frequency" "GHz" (\_ -> readIORef gaugeValueRef)
+
+        forceFlushMeterProvider provider
+        writeIORef gaugeValueRef 4.2
+        forceFlushMeterProvider provider
+
+      exported <- secondBatch batchesRef
+      gaugeMetric <- expectGaugeMetric "cpu_frequency" exported
+      singleGaugePointValue gaugeMetric `shouldReturn` 4.2
 
   describe "temporality per instrument kind" $ do
     it "supports Counter delta while ObservableCounter remains cumulative" $ do
