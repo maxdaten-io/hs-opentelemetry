@@ -8,6 +8,7 @@ module OpenTelemetry.Internal.Metrics.Types where
 
 import Control.Concurrent.Async (Async)
 import Data.HashMap.Strict (HashMap)
+import Data.Hashable (Hashable)
 import Data.IORef (IORef)
 import Data.Text (Text)
 import Data.Vector (Vector)
@@ -35,6 +36,7 @@ data MetricReader = MetricReader
 
 data MetricStream = MetricStream
   { metricStreamScope :: !InstrumentationLibrary
+  , metricStreamInstrumentKind :: !InstrumentKind
   , metricStreamCollect :: IO MetricData
   }
 
@@ -67,6 +69,9 @@ data InstrumentKind
   | ObservableUpDownCounterKind
   | ObservableGaugeKind
   deriving (Show, Eq, Ord, Generic)
+
+
+instance Hashable InstrumentKind
 
 
 data AggregationTemporality
@@ -131,6 +136,7 @@ data ObservableUpDownCounter a = ObservableUpDownCounter
 
 data DataPoint a = DataPoint
   { dataPointAttributes :: !Attributes
+  , dataPointStartTimestamp :: !(Maybe Timestamp)
   , dataPointTimestamp :: !Timestamp
   , dataPointValue :: !a
   }
@@ -164,6 +170,7 @@ data MetricData
 
 data HistogramDataPoint = HistogramDataPoint
   { histogramDataPointAttributes :: !Attributes
+  , histogramDataPointStartTimestamp :: !(Maybe Timestamp)
   , histogramDataPointTimestamp :: !Timestamp
   , histogramDataPointCount :: !Int
   , histogramDataPointSum :: !Double
@@ -178,5 +185,6 @@ data HistogramDataPoint = HistogramDataPoint
 data ScopeMetrics = ScopeMetrics
   { scopeMetricsScope :: !InstrumentationLibrary
   , scopeMetricsMetrics :: !(Vector MetricData)
+  , scopeMetricsInstrumentKinds :: !(Vector InstrumentKind)
   }
   deriving (Show, Eq, Generic)

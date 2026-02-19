@@ -175,6 +175,7 @@ collectAndReset acc timestamp =
             V.fromList
               [ DataPoint
                 { dataPointAttributes = attrs
+                , dataPointStartTimestamp = Nothing
                 , dataPointTimestamp = timestamp
                 , dataPointValue = val
                 }
@@ -198,6 +199,7 @@ collectAndReset acc timestamp =
             V.fromList
               [ DataPoint
                 { dataPointAttributes = attrs
+                , dataPointStartTimestamp = Nothing
                 , dataPointTimestamp = ts
                 , dataPointValue = val
                 }
@@ -219,6 +221,7 @@ collectAndReset acc timestamp =
             V.fromList
               [ HistogramDataPoint
                 { histogramDataPointAttributes = attrs
+                , histogramDataPointStartTimestamp = Nothing
                 , histogramDataPointTimestamp = timestamp
                 , histogramDataPointCount = histogramAccumulatorCount hd
                 , histogramDataPointSum = histogramAccumulatorSum hd
