@@ -1,4 +1,5 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -60,6 +61,7 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.List (foldl')
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Vector as V
 import OpenTelemetry.Attributes
 import OpenTelemetry.Common
@@ -67,6 +69,7 @@ import OpenTelemetry.Internal.Common.Types
 import OpenTelemetry.Internal.Metrics.Types
 import OpenTelemetry.Resource
 import System.Clock
+import System.IO (hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
 
 
@@ -125,6 +128,7 @@ getMeterProviderResources = meterProviderResources
 createMeterProvider :: (MonadIO m) => [MetricReader] -> MeterProviderOptions -> m MeterProvider
 createMeterProvider readers opts = liftIO $ do
   meterProviderMetricStreams <- newIORef []
+  meterProviderRegisteredInstruments <- newIORef H.empty
   meterProviderIsShutdown <- newIORef False
   let provider =
         MeterProvider
@@ -132,6 +136,7 @@ createMeterProvider readers opts = liftIO $ do
           , meterProviderResources = meterProviderOptionsResources opts
           , meterProviderAttributeLimits = meterProviderOptionsAttributeLimits opts
           , meterProviderMetricStreams
+          , meterProviderRegisteredInstruments
           , meterProviderIsShutdown
           }
       collect = collectScopeMetrics provider
@@ -167,8 +172,38 @@ getMeterMeterProvider = meterProvider
 
 
 registerMetricStream :: MeterProvider -> MetricStream -> IO ()
-registerMetricStream MeterProvider {meterProviderMetricStreams} stream =
-  atomicModifyIORef' meterProviderMetricStreams (\streams -> (stream : streams, ()))
+registerMetricStream MeterProvider {meterProviderMetricStreams, meterProviderRegisteredInstruments} stream@MetricStream {..} = do
+  let registryKey = (metricStreamScope, T.toCaseFold metricStreamName)
+      identity = (metricStreamInstrumentKind, metricStreamName, metricStreamDescription, metricStreamUnit)
+  previous <- atomicModifyIORef' meterProviderRegisteredInstruments $ \registry ->
+    case H.lookup registryKey registry of
+      Nothing -> (H.insert registryKey identity registry, Nothing)
+      Just existing -> (registry, Just existing)
+  case previous of
+    Nothing -> pure ()
+    Just (existingKind, existingName, existingDescription, existingUnit)
+      | existingKind == metricStreamInstrumentKind
+          && T.toCaseFold existingName == T.toCaseFold metricStreamName
+          && existingDescription == metricStreamDescription
+          && existingUnit == metricStreamUnit ->
+          when (existingName /= metricStreamName) $
+            warnMetrics $
+              "case-insensitive duplicate instrument registration for '"
+                <> T.unpack metricStreamName
+                <> "', reusing first-seen name '"
+                <> T.unpack existingName
+                <> "'"
+      | otherwise ->
+          warnMetrics $
+            "duplicate instrument registration for '"
+              <> T.unpack metricStreamName
+              <> "' conflicts with existing kind="
+              <> show existingKind
+              <> ", unit="
+              <> T.unpack existingUnit
+              <> ", description="
+              <> show existingDescription
+  atomicModifyIORef' meterProviderMetricStreams (\streams -> (streams <> [stream], ()))
 
 
 isProviderShutdown :: MeterProvider -> IO Bool
@@ -189,14 +224,165 @@ collectScopeMetrics MeterProvider {meterProviderMetricStreams, meterProviderReso
           }
       )
   let grouped = H.fromListWith combineScopeMetrics scoped
-  pure (meterProviderResources, H.elems grouped)
+  pure (meterProviderResources, fmap mergeScopeMetrics (H.elems grouped))
   where
     combineScopeMetrics left right =
       ScopeMetrics
         { scopeMetricsScope = scopeMetricsScope left
-        , scopeMetricsMetrics = scopeMetricsMetrics left <> scopeMetricsMetrics right
-        , scopeMetricsInstrumentKinds = scopeMetricsInstrumentKinds left <> scopeMetricsInstrumentKinds right
+        , scopeMetricsMetrics = scopeMetricsMetrics right <> scopeMetricsMetrics left
+        , scopeMetricsInstrumentKinds = scopeMetricsInstrumentKinds right <> scopeMetricsInstrumentKinds left
         }
+
+
+type MetricIdentity = (Text, InstrumentKind, Text, Text, Maybe Bool)
+
+
+mergeScopeMetrics :: ScopeMetrics -> ScopeMetrics
+mergeScopeMetrics scopeMetrics@ScopeMetrics {scopeMetricsMetrics, scopeMetricsInstrumentKinds}
+  | V.length scopeMetricsMetrics /= V.length scopeMetricsInstrumentKinds = scopeMetrics
+  | otherwise =
+      let pairs = zip (V.toList scopeMetricsInstrumentKinds) (V.toList scopeMetricsMetrics)
+          (_, mergedPairs) =
+            foldl'
+              ( \(indexMap, acc) pair@(kind, metricData) ->
+                  let identity = metricIdentity kind metricData
+                  in case H.lookup identity indexMap of
+                      Nothing ->
+                        (H.insert identity (length acc) indexMap, acc <> [pair])
+                      Just existingIndex ->
+                        (indexMap, updateAt existingIndex (\(existingKind, existingMetric) -> (existingKind, mergeMetricData existingMetric metricData)) acc)
+              )
+              (H.empty, [])
+              pairs
+      in scopeMetrics
+          { scopeMetricsMetrics = V.fromList (fmap snd mergedPairs)
+          , scopeMetricsInstrumentKinds = V.fromList (fmap fst mergedPairs)
+          }
+
+
+metricIdentity :: InstrumentKind -> MetricData -> MetricIdentity
+metricIdentity kind = \case
+  SumData {sumName, sumDescription, sumUnit, sumIsMonotonic} ->
+    (T.toCaseFold sumName, kind, sumDescription, sumUnit, Just sumIsMonotonic)
+  GaugeData {gaugeName, gaugeDescription, gaugeUnit} ->
+    (T.toCaseFold gaugeName, kind, gaugeDescription, gaugeUnit, Nothing)
+  HistogramData {histogramName, histogramDescription, histogramUnit} ->
+    (T.toCaseFold histogramName, kind, histogramDescription, histogramUnit, Nothing)
+
+
+updateAt :: Int -> (a -> a) -> [a] -> [a]
+updateAt index updateFn values =
+  case splitAt index values of
+    (prefix, current : suffix) -> prefix <> (updateFn current : suffix)
+    _ -> values
+
+
+mergeMetricData :: MetricData -> MetricData -> MetricData
+mergeMetricData left right = case (left, right) of
+  (leftSum@SumData {}, rightSum@SumData {}) ->
+    leftSum {sumDataPoints = mergeSumPoints (sumDataPoints leftSum) (sumDataPoints rightSum)}
+  (leftGauge@GaugeData {}, rightGauge@GaugeData {}) ->
+    leftGauge {gaugeDataPoints = mergeGaugePoints (gaugeDataPoints leftGauge) (gaugeDataPoints rightGauge)}
+  (leftHistogram@HistogramData {}, rightHistogram@HistogramData {}) ->
+    leftHistogram {histogramDataPoints = mergeHistogramPoints (histogramDataPoints leftHistogram) (histogramDataPoints rightHistogram)}
+  _ -> left
+
+
+mergeSumPoints :: V.Vector (DataPoint Double) -> V.Vector (DataPoint Double) -> V.Vector (DataPoint Double)
+mergeSumPoints left right =
+  V.fromList $
+    H.elems $
+      foldl'
+        ( \acc point@DataPoint {dataPointAttributes} ->
+            H.insertWith
+              combine
+              dataPointAttributes
+              point
+              acc
+        )
+        H.empty
+        (V.toList left <> V.toList right)
+  where
+    combine new old =
+      old
+        { dataPointStartTimestamp = combineStartTimestamp (dataPointStartTimestamp old) (dataPointStartTimestamp new)
+        , dataPointTimestamp = max (dataPointTimestamp old) (dataPointTimestamp new)
+        , dataPointValue = dataPointValue old + dataPointValue new
+        }
+
+
+mergeGaugePoints :: V.Vector (DataPoint Double) -> V.Vector (DataPoint Double) -> V.Vector (DataPoint Double)
+mergeGaugePoints left right =
+  V.fromList $
+    H.elems $
+      foldl'
+        ( \acc point@DataPoint {dataPointAttributes} ->
+            H.insertWith
+              combine
+              dataPointAttributes
+              point
+              acc
+        )
+        H.empty
+        (V.toList left <> V.toList right)
+  where
+    combine new old
+      | dataPointTimestamp new >= dataPointTimestamp old = new
+      | otherwise = old
+
+
+mergeHistogramPoints :: V.Vector HistogramDataPoint -> V.Vector HistogramDataPoint -> V.Vector HistogramDataPoint
+mergeHistogramPoints left right =
+  V.fromList $
+    H.elems $
+      foldl'
+        ( \acc point@HistogramDataPoint {histogramDataPointAttributes, histogramDataPointExplicitBounds} ->
+            H.insertWith
+              combine
+              (histogramDataPointAttributes, V.toList histogramDataPointExplicitBounds)
+              point
+              acc
+        )
+        H.empty
+        (V.toList left <> V.toList right)
+  where
+    combine new old =
+      old
+        { histogramDataPointStartTimestamp =
+            combineStartTimestamp
+              (histogramDataPointStartTimestamp old)
+              (histogramDataPointStartTimestamp new)
+        , histogramDataPointTimestamp = max (histogramDataPointTimestamp old) (histogramDataPointTimestamp new)
+        , histogramDataPointCount = histogramDataPointCount old + histogramDataPointCount new
+        , histogramDataPointSum = histogramDataPointSum old + histogramDataPointSum new
+        , histogramDataPointMin = combineMin (histogramDataPointMin old) (histogramDataPointMin new)
+        , histogramDataPointMax = combineMax (histogramDataPointMax old) (histogramDataPointMax new)
+        , histogramDataPointBucketCounts =
+            V.zipWith (+) (histogramDataPointBucketCounts old) (histogramDataPointBucketCounts new)
+        }
+
+
+combineStartTimestamp :: Maybe Timestamp -> Maybe Timestamp -> Maybe Timestamp
+combineStartTimestamp left right = case (left, right) of
+  (Nothing, other) -> other
+  (other, Nothing) -> other
+  (Just leftTs, Just rightTs) -> Just (min leftTs rightTs)
+
+
+combineMin :: Maybe Double -> Maybe Double -> Maybe Double
+combineMin Nothing other = other
+combineMin other Nothing = other
+combineMin (Just left) (Just right) = Just (min left right)
+
+
+combineMax :: Maybe Double -> Maybe Double -> Maybe Double
+combineMax Nothing other = other
+combineMax other Nothing = other
+combineMax (Just left) (Just right) = Just (max left right)
+
+
+warnMetrics :: String -> IO ()
+warnMetrics = hPutStrLn stderr . ("Warning: " <>)
 
 
 attributeMapToAttributes :: AttributeLimits -> AttributeMap -> Attributes
@@ -266,7 +452,7 @@ createCounter meter name desc unit = liftIO $ do
             }
   shutdown <- isProviderShutdown provider
   unless shutdown $
-    registerMetricStream provider (MetricStream (meterName meter) CounterKind collectFn)
+    registerMetricStream provider (MetricStream (meterName meter) name desc unit CounterKind collectFn)
   pure $
     Counter
       { counterName = name
@@ -309,7 +495,7 @@ createUpDownCounter meter name desc unit = liftIO $ do
             }
   shutdown <- isProviderShutdown provider
   unless shutdown $
-    registerMetricStream provider (MetricStream (meterName meter) UpDownCounterKind collectFn)
+    registerMetricStream provider (MetricStream (meterName meter) name desc unit UpDownCounterKind collectFn)
   pure $
     UpDownCounter
       { upDownCounterName = name
@@ -394,7 +580,7 @@ createHistogram meter name desc unit = liftIO $ do
             }
   shutdown <- isProviderShutdown provider
   unless shutdown $
-    registerMetricStream provider (MetricStream (meterName meter) HistogramKind collectFn)
+    registerMetricStream provider (MetricStream (meterName meter) name desc unit HistogramKind collectFn)
   pure $
     Histogram
       { histogramName = name
@@ -434,7 +620,7 @@ createGauge meter name desc unit = liftIO $ do
             }
   shutdown <- isProviderShutdown provider
   unless shutdown $
-    registerMetricStream provider (MetricStream (meterName meter) GaugeKind collectFn)
+    registerMetricStream provider (MetricStream (meterName meter) name desc unit GaugeKind collectFn)
   pure $
     Gauge
       { gaugeName = name
@@ -486,7 +672,7 @@ createObservableGauge meter name desc unit callbacks = liftIO $ do
             }
   shutdown <- isProviderShutdown provider
   unless shutdown $
-    registerMetricStream provider (MetricStream (meterName meter) ObservableGaugeKind collectFn)
+    registerMetricStream provider (MetricStream (meterName meter) name desc unit ObservableGaugeKind collectFn)
   pure $
     ObservableGauge
       { observableGaugeName = name
@@ -544,7 +730,7 @@ createObservableCounter meter name desc unit callbacks = liftIO $ do
             }
   shutdown <- isProviderShutdown provider
   unless shutdown $
-    registerMetricStream provider (MetricStream (meterName meter) ObservableCounterKind collectFn)
+    registerMetricStream provider (MetricStream (meterName meter) name desc unit ObservableCounterKind collectFn)
   pure $
     ObservableCounter
       { observableCounterName = name
@@ -600,7 +786,7 @@ createObservableUpDownCounter meter name desc unit callbacks = liftIO $ do
             }
   shutdown <- isProviderShutdown provider
   unless shutdown $
-    registerMetricStream provider (MetricStream (meterName meter) ObservableUpDownCounterKind collectFn)
+    registerMetricStream provider (MetricStream (meterName meter) name desc unit ObservableUpDownCounterKind collectFn)
   pure $
     ObservableUpDownCounter
       { observableUpDownCounterName = name
