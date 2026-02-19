@@ -161,17 +161,18 @@ forceFlushMeterProvider MeterProvider {..} = liftIO $ do
 
 makeMeter :: MeterProvider -> InstrumentationLibrary -> MeterOptions -> Meter
 makeMeter provider lib MeterOptions {meterSchema} =
-  Meter
-    { meterName =
+  let scope =
         lib
           { librarySchemaUrl = fromMaybe (librarySchemaUrl lib) meterSchema
           }
-    , meterProvider = provider
-    }
+  in Meter {meterName = scope, meterProvider = provider}
 
 
 getMeter :: (MonadIO m) => MeterProvider -> InstrumentationLibrary -> MeterOptions -> m Meter
-getMeter provider lib opts = liftIO $ pure $ makeMeter provider lib opts
+getMeter provider lib opts = liftIO $ do
+  when (T.null (libraryName lib)) $
+    warnMetrics "invalid meter name: empty instrumentation scope name"
+  pure $ makeMeter provider lib opts
 
 
 getMeterMeterProvider :: Meter -> MeterProvider
