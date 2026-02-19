@@ -272,6 +272,13 @@ spec = describe "Metrics" $ do
     shutdownMeterProvider provider
     readIORef shutdownRef `shouldReturn` True
 
+  it "does not allow reusing a metric reader across meter providers" $ do
+    (_batchesRef, _shutdownRef, exporter) <- mkCaptureExporter
+    reader <- manualReader exporter
+    provider <- createMeterProvider [reader] emptyMeterProviderOptions
+    createMeterProvider [reader] emptyMeterProviderOptions `shouldThrow` anyException
+    shutdownMeterProvider provider
+
   it "manual reader collect fails after shutdown" $ do
     (_batchesRef, _shutdownRef, exporter) <- mkCaptureExporter
     reader <- manualReader exporter
