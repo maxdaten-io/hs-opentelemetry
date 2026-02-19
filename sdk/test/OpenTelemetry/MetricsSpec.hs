@@ -258,7 +258,16 @@ spec = describe "Metrics" $ do
 
       withMeterProvider [exporter] $ \provider -> do
         meter <- getMeter provider "spec.metrics.gauge" meterOptions
-        _ <- createObservableGauge meter "cpu_frequency" "cpu frequency" "GHz" (\_ -> readIORef gaugeValueRef)
+        _ <-
+          createObservableGauge
+            meter
+            "cpu_frequency"
+            "cpu frequency"
+            "GHz"
+            [ do
+                value <- readIORef gaugeValueRef
+                pure [observation value mempty]
+            ]
 
         forceFlushMeterProvider provider
         writeIORef gaugeValueRef 4.2
@@ -267,6 +276,38 @@ spec = describe "Metrics" $ do
       exported <- secondBatch batchesRef
       gaugeMetric <- expectGaugeMetric "cpu_frequency" exported
       singleGaugePointValue gaugeMetric `shouldReturn` 4.2
+
+    it "supports multiple observations and callback unregister on observable gauge" $ do
+      (batchesRef, exporter) <- mkTemporalityCaptureExporter (const CumulativeTemporality)
+
+      withMeterProvider [exporter] $ \provider -> do
+        meter <- getMeter provider "spec.metrics.gauge" meterOptions
+        observableGauge <- createObservableGauge meter "cpu_frequency" "cpu frequency" "GHz" []
+        registration <-
+          observableGaugeRegisterCallback observableGauge $
+            pure
+              [ observation 3.2 (HashMap.singleton "cpu" (toAttribute ("0" :: Text)))
+              , observation 3.8 (HashMap.singleton "cpu" (toAttribute ("1" :: Text)))
+              ]
+
+        forceFlushMeterProvider provider
+        unregisterCallback registration
+        forceFlushMeterProvider provider
+
+      batches <- reverse <$> readIORef batchesRef
+      case batches of
+        (firstBatch : secondBatch_ : _) -> do
+          firstMetric <- expectGaugeMetric "cpu_frequency" firstBatch
+          secondMetric <- expectGaugeMetric "cpu_frequency" secondBatch_
+          let firstPoints = case firstMetric of
+                GaugeData {gaugeDataPoints} -> Vector.length gaugeDataPoints
+                _ -> 0
+              secondPoints = case secondMetric of
+                GaugeData {gaugeDataPoints} -> Vector.length gaugeDataPoints
+                _ -> 0
+          firstPoints `shouldBe` 2
+          secondPoints `shouldBe` 0
+        _ -> failSpec ("expected at least two export batches, got " <> show (length batches))
 
   describe "temporality per instrument kind" $ do
     it "supports Counter delta while ObservableCounter remains cumulative" $ do
@@ -280,7 +321,16 @@ spec = describe "Metrics" $ do
       withMeterProvider [exporter] $ \provider -> do
         meter <- getMeter provider "spec.metrics.temporality" meterOptions
         counter <- createCounter meter "requests_total" "requests" "1"
-        _ <- createObservableCounter meter "workers_total" "workers" "1" (\_ -> readIORef observableValueRef)
+        _ <-
+          createObservableCounter
+            meter
+            "workers_total"
+            "workers"
+            "1"
+            [ do
+                value <- readIORef observableValueRef
+                pure [observation value mempty]
+            ]
 
         counterAdd counter 5 mempty
         forceFlushMeterProvider provider
@@ -309,7 +359,16 @@ spec = describe "Metrics" $ do
       withMeterProvider [exporter] $ \provider -> do
         meter <- getMeter provider "spec.metrics.temporality" meterOptions
         counter <- createCounter meter "requests_total" "requests" "1"
-        _ <- createObservableCounter meter "workers_total" "workers" "1" (\_ -> readIORef observableValueRef)
+        _ <-
+          createObservableCounter
+            meter
+            "workers_total"
+            "workers"
+            "1"
+            [ do
+                value <- readIORef observableValueRef
+                pure [observation value mempty]
+            ]
 
         counterAdd counter 5 mempty
         forceFlushMeterProvider provider
@@ -338,7 +397,16 @@ spec = describe "Metrics" $ do
       withMeterProvider [exporter] $ \provider -> do
         meter <- getMeter provider "spec.metrics.temporality" meterOptions
         upDownCounter <- createUpDownCounter meter "queue_depth" "depth" "1"
-        _ <- createObservableUpDownCounter meter "pressure_level" "pressure" "1" (\_ -> readIORef observableValueRef)
+        _ <-
+          createObservableUpDownCounter
+            meter
+            "pressure_level"
+            "pressure"
+            "1"
+            [ do
+                value <- readIORef observableValueRef
+                pure [observation value mempty]
+            ]
 
         upDownCounterAdd upDownCounter 4 mempty
         forceFlushMeterProvider provider

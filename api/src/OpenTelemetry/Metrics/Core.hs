@@ -32,6 +32,9 @@ module OpenTelemetry.Metrics.Core (
   createHistogram,
   Gauge (..),
   createGauge,
+  Observation (..),
+  observation,
+  CallbackRegistration (..),
   ObservableGauge (..),
   createObservableGauge,
   ObservableCounter (..),
@@ -54,6 +57,7 @@ import Control.Monad.IO.Class
 import qualified Data.HashMap.Strict as H
 import Data.IORef
 import Data.List (foldl')
+import qualified Data.IntMap.Strict as IntMap
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Vector as V
@@ -188,6 +192,37 @@ collectScopeMetrics MeterProvider {meterProviderMetricStreams, meterProviderReso
 
 attributeMapToAttributes :: AttributeLimits -> AttributeMap -> Attributes
 attributeMapToAttributes limits attrs = addAttributes limits emptyAttributes attrs
+
+
+observation :: a -> AttributeMap -> Observation a
+observation observationValue observationAttributes = Observation {observationValue, observationAttributes}
+
+
+newtype CallbackRegistry a = CallbackRegistry (IORef (Int, IntMap.IntMap (IO [Observation a])))
+
+
+newCallbackRegistry :: [IO [Observation a]] -> IO (CallbackRegistry a)
+newCallbackRegistry callbacks = do
+  let entries = IntMap.fromList (zip [0 ..] callbacks)
+  CallbackRegistry <$> newIORef (length callbacks, entries)
+
+
+registerInCallbackRegistry :: CallbackRegistry a -> IO [Observation a] -> IO CallbackRegistration
+registerInCallbackRegistry (CallbackRegistry callbacksRef) callback = do
+  callbackId <- atomicModifyIORef' callbacksRef $ \(nextId, callbacks) ->
+    ((nextId + 1, IntMap.insert nextId callback callbacks), nextId)
+  pure $
+    CallbackRegistration
+      { unregisterCallback =
+          atomicModifyIORef' callbacksRef $ \(nextId, callbacks) ->
+            ((nextId, IntMap.delete callbackId callbacks), ())
+      }
+
+
+collectCallbackObservations :: CallbackRegistry a -> IO [Observation a]
+collectCallbackObservations (CallbackRegistry callbacksRef) = do
+  (_, callbacks) <- readIORef callbacksRef
+  concat <$> mapM id (IntMap.elems callbacks)
 
 
 createCounter :: (MonadIO m) => Meter -> Text -> Text -> Text -> m (Counter Double)
@@ -393,28 +428,36 @@ createObservableGauge
   -> Text
   -> Text
   -> Text
-  -> (AttributeMap -> IO Double)
+  -> [IO [Observation Double]]
   -> m (ObservableGauge Double)
-createObservableGauge meter name desc unit callback = liftIO $ do
+createObservableGauge meter name desc unit callbacks = liftIO $ do
   startTs <- getTimestamp
+  callbackRegistry <- newCallbackRegistry callbacks
   let provider = getMeterMeterProvider meter
       limits = meterProviderAttributeLimits provider
       collectFn = do
         ts <- getTimestamp
-        value <- callback mempty
+        observations <- collectCallbackObservations callbackRegistry
+        let values =
+              foldl'
+                (\m Observation {observationValue, observationAttributes} -> H.insert observationAttributes observationValue m)
+                H.empty
+                observations
         pure $
           GaugeData
             { gaugeName = name
             , gaugeDescription = desc
             , gaugeUnit = unit
             , gaugeDataPoints =
-                V.singleton
-                  DataPoint
-                    { dataPointAttributes = attributeMapToAttributes limits mempty
+                V.fromList
+                  [ DataPoint
+                    { dataPointAttributes = attributeMapToAttributes limits attrs
                     , dataPointStartTimestamp = Just startTs
                     , dataPointTimestamp = ts
                     , dataPointValue = value
                     }
+                  | (attrs, value) <- H.toList values
+                  ]
             }
   registerMetricStream provider (MetricStream (meterName meter) ObservableGaugeKind collectFn)
   pure $
@@ -423,7 +466,7 @@ createObservableGauge meter name desc unit callback = liftIO $ do
       , observableGaugeDescription = desc
       , observableGaugeUnit = unit
       , observableGaugeMeter = meter
-      , observableGaugeCallback = callback
+      , observableGaugeRegisterCallback = registerInCallbackRegistry callbackRegistry
       }
 
 
@@ -433,15 +476,23 @@ createObservableCounter
   -> Text
   -> Text
   -> Text
-  -> (AttributeMap -> IO Double)
+  -> [IO [Observation Double]]
   -> m (ObservableCounter Double)
-createObservableCounter meter name desc unit callback = liftIO $ do
+createObservableCounter meter name desc unit callbacks = liftIO $ do
   startTs <- getTimestamp
+  callbackRegistry <- newCallbackRegistry callbacks
   let provider = getMeterMeterProvider meter
       limits = meterProviderAttributeLimits provider
       collectFn = do
         ts <- getTimestamp
-        value <- callback mempty
+        observations <- collectCallbackObservations callbackRegistry
+        let values =
+              foldl'
+                ( \m Observation {observationValue, observationAttributes} ->
+                    H.insert observationAttributes (max 0 observationValue) m
+                )
+                H.empty
+                observations
         pure $
           SumData
             { sumName = name
@@ -450,13 +501,15 @@ createObservableCounter meter name desc unit callback = liftIO $ do
             , sumTemporality = CumulativeTemporality
             , sumIsMonotonic = True
             , sumDataPoints =
-                V.singleton
-                  DataPoint
-                    { dataPointAttributes = attributeMapToAttributes limits mempty
+                V.fromList
+                  [ DataPoint
+                    { dataPointAttributes = attributeMapToAttributes limits attrs
                     , dataPointStartTimestamp = Just startTs
                     , dataPointTimestamp = ts
-                    , dataPointValue = max 0 value
+                    , dataPointValue = value
                     }
+                  | (attrs, value) <- H.toList values
+                  ]
             }
   registerMetricStream provider (MetricStream (meterName meter) ObservableCounterKind collectFn)
   pure $
@@ -465,7 +518,7 @@ createObservableCounter meter name desc unit callback = liftIO $ do
       , observableCounterDescription = desc
       , observableCounterUnit = unit
       , observableCounterMeter = meter
-      , observableCounterCallback = callback
+      , observableCounterRegisterCallback = registerInCallbackRegistry callbackRegistry
       }
 
 
@@ -475,15 +528,21 @@ createObservableUpDownCounter
   -> Text
   -> Text
   -> Text
-  -> (AttributeMap -> IO Double)
+  -> [IO [Observation Double]]
   -> m (ObservableUpDownCounter Double)
-createObservableUpDownCounter meter name desc unit callback = liftIO $ do
+createObservableUpDownCounter meter name desc unit callbacks = liftIO $ do
   startTs <- getTimestamp
+  callbackRegistry <- newCallbackRegistry callbacks
   let provider = getMeterMeterProvider meter
       limits = meterProviderAttributeLimits provider
       collectFn = do
         ts <- getTimestamp
-        value <- callback mempty
+        observations <- collectCallbackObservations callbackRegistry
+        let values =
+              foldl'
+                (\m Observation {observationValue, observationAttributes} -> H.insert observationAttributes observationValue m)
+                H.empty
+                observations
         pure $
           SumData
             { sumName = name
@@ -492,13 +551,15 @@ createObservableUpDownCounter meter name desc unit callback = liftIO $ do
             , sumTemporality = CumulativeTemporality
             , sumIsMonotonic = False
             , sumDataPoints =
-                V.singleton
-                  DataPoint
-                    { dataPointAttributes = attributeMapToAttributes limits mempty
+                V.fromList
+                  [ DataPoint
+                    { dataPointAttributes = attributeMapToAttributes limits attrs
                     , dataPointStartTimestamp = Just startTs
                     , dataPointTimestamp = ts
                     , dataPointValue = value
                     }
+                  | (attrs, value) <- H.toList values
+                  ]
             }
   registerMetricStream provider (MetricStream (meterName meter) ObservableUpDownCounterKind collectFn)
   pure $
@@ -507,7 +568,7 @@ createObservableUpDownCounter meter name desc unit callback = liftIO $ do
       , observableUpDownCounterDescription = desc
       , observableUpDownCounterUnit = unit
       , observableUpDownCounterMeter = meter
-      , observableUpDownCounterCallback = callback
+      , observableUpDownCounterRegisterCallback = registerInCallbackRegistry callbackRegistry
       }
 
 
