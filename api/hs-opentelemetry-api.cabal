@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.37.0.
+-- This file has been generated from package.yaml by hpack version 0.38.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -40,13 +40,16 @@ library
       OpenTelemetry.Environment
       OpenTelemetry.Exporter
       OpenTelemetry.Exporter.LogRecord
+      OpenTelemetry.Exporter.Metric
       OpenTelemetry.Exporter.Span
       OpenTelemetry.Internal.Common.Types
       OpenTelemetry.Internal.Logs.Core
       OpenTelemetry.Internal.Logs.Types
+      OpenTelemetry.Internal.Metrics.Types
       OpenTelemetry.Internal.Trace.Id
       OpenTelemetry.LogAttributes
       OpenTelemetry.Logs.Core
+      OpenTelemetry.Metrics.Core
       OpenTelemetry.Processor
       OpenTelemetry.Processor.LogRecord
       OpenTelemetry.Processor.Span
@@ -76,6 +79,7 @@ library
   other-modules:
       OpenTelemetry.Context.Types
       OpenTelemetry.Internal.Trace.Types
+      OpenTelemetry.Internal.Metrics.Types
       Paths_hs_opentelemetry_api
   hs-source-dirs:
       src
@@ -91,6 +95,7 @@ library
     , bytestring
     , charset
     , clock
+    , containers
     , hashable
     , http-types
     , memory
