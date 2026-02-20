@@ -39,6 +39,7 @@ library:
   - text
   - unordered-containers
   - vector
+  - vector-builder
   - zlib
 
 # Test suite not yet implemented
