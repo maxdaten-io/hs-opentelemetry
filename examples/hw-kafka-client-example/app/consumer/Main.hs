@@ -42,7 +42,10 @@ withTracer f =
 main :: IO ()
 main = withTracer $ const $ do
   -- NOTE: do proper args parsing
-  consumerGroupText <- pack . head <$> getArgs
+  args <- getArgs
+  consumerGroupText <- case args of
+    consumerGroup : _ -> pure (pack consumerGroup)
+    [] -> fail "missing consumer group argument"
   let cp = consumerProps consumerGroupText
   res <- Control.Exception.bracket (mkConsumer cp) clConsumer (runHandler cp)
   case res of
