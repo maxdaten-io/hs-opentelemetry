@@ -91,9 +91,25 @@ formats is required. Implementing more than one format is optional.
 
 ## Metrics
 
-|Feature                                       |Optional| Haskell |
-|----------------------------------------------|--------|--|
-|TBD|
+| Feature                                                                                     | Optional | Haskell |
+|---------------------------------------------------------------------------------------------|----------|----|
+| [MeterProvider](specification/metrics/api.md#meterprovider-operations)                     |          | +  |
+| Create MeterProvider                                                                        |          | +  |
+| Get a Meter                                                                                 |          | +  |
+| Shutdown                                                                                    |          | +  |
+| ForceFlush                                                                                  |          | +  |
+| Counter                                                                                     |          | +  |
+| UpDownCounter                                                                               |          | +  |
+| Histogram                                                                                   |          | +  |
+| Gauge                                                                                       |          | +  |
+| ObservableCounter                                                                           |          | +  |
+| ObservableUpDownCounter                                                                     |          | +  |
+| Periodic metric reader                                                                      |          | +  |
+| Manual/explicit metric reader force flush                                                   |          | +  |
+| OTLP HTTP/protobuf metrics exporter                                                         |          | +  |
+| Instrumentation scope propagation in export payload                                          |          | +  |
+| Resource propagation in export payload                                                       |          | +  |
+| Aggregation temporality selection per instrument kind                                        | X        | (partial: cumulative-first in current SDK defaults) |
 
 ## Resource
 
@@ -142,7 +158,7 @@ Note: Support for environment variables is optional.
 |OTEL_EXPORTER_JAEGER_*                        |   |
 |OTEL_EXPORTER_ZIPKIN_*                        |   |
 |OTEL_TRACES_EXPORTER                          | (partial support) |
-|OTEL_METRICS_EXPORTER                         |   |
+|OTEL_METRICS_EXPORTER                         | + |
 |OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT               | + |
 |OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT        | + |
 |OTEL_SPAN_EVENT_COUNT_LIMIT                   | + |

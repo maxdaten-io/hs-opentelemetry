@@ -1,5 +1,8 @@
 import qualified OpenTelemetry.BaggageSpec as BaggageSpec
 import qualified OpenTelemetry.ContextSpec as ContextSpec
+import qualified OpenTelemetry.LogRecordProcessorSpec as LogRecordProcessorSpec
+import qualified OpenTelemetry.LogSpec as LogSpec
+import qualified OpenTelemetry.MetricsSpec as MetricsSpec
 import qualified OpenTelemetry.ResourceSpec as ResourceSpec
 import OpenTelemetry.Trace (initializeGlobalTracerProvider)
 import qualified OpenTelemetry.TraceSpec as TraceSpec
@@ -18,4 +21,7 @@ main = do
     BaggageSpec.spec
     ContextSpec.spec
     TraceSpec.spec
+    LogSpec.spec
+    LogRecordProcessorSpec.spec
+    MetricsSpec.spec
     ResourceSpec.spec
