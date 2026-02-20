@@ -72,4 +72,4 @@ extra-deps:
 
 nix:
   enable: true
-  packages: [libffi, mysql80, openssl, pcre, postgresql, protobuf, rdkafka, zlib, zstd]
+  packages: [darwin.libresolv, libffi, mysql80, openssl, pcre, postgresql, protobuf, rdkafka, zlib, zstd]
