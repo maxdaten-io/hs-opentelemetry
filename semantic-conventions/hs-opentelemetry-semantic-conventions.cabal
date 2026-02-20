@@ -65,6 +65,7 @@ executable generate
                  filepath,
                  yaml,
                  text,
-                 -- unordered-containers is necessary only when aeson < 2 is used
-                 unordered-containers,
                  vector
+  if impl(ghc < 9.2)
+    -- unordered-containers is required by aeson < 2
+    build-depends: unordered-containers

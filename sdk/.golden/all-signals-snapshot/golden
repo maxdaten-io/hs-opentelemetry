@@ -1,0 +1,29 @@
+# all-signals snapshot
+signals=traces,logs,metrics
+resource=[deployment.environment.name="snapshot",service.name="hs-opentelemetry-sdk-all-signals",service.version="1.0.0-test"]
+
+[traces]
+span="snapshot.child" | parent=present | kind=Internal | status=Error("child-failure") | trace=t1 | span_id=s1 | flags=TraceFlags 1 | start=<ts> | end=<ts> | attrs=[span.level="child"]
+span="snapshot.root" | parent=none | kind=Internal | status=Ok | trace=t1 | span_id=s2 | flags=TraceFlags 1 | start=<ts> | end=<ts> | attrs=[span.level="root"]
+
+[logs]
+event="contextual.event" | severity_number=Warn | severity_text="WARN" | timestamp=<none> | observed=<ts> | trace=t1 | span_id=s1 | flags=TraceFlags 1 | body="contextual log" | attrs=[count=1,dropped=0,values={log.kind="contextual"}]
+event="standalone.event" | severity_number=Info | severity_text="INFO" | timestamp=<none> | observed=<ts> | trace=<none> | span_id=<none> | flags=<none> | body="standalone log" | attrs=[count=1,dropped=0,values={log.kind="standalone"}]
+
+[metrics]
+batch=1 resource=[deployment.environment.name="snapshot",service.name="hs-opentelemetry-sdk-all-signals",service.version="1.0.0-test"]
+scope="snapshot-meter" version="" schema="" attrs=[]
+metric=gauge name="cpu_frequency" unit="GHz"
+  point attrs=[] ts=<ts> value=3.4
+metric=gauge name="temperature_gauge" unit="c"
+  point attrs=[] ts=<ts> value=21.5
+metric=histogram name="request_latency_ms" unit="ms" temporality=CumulativeTemporality
+  point attrs=[endpoint="/api"] ts=<ts> count=1 sum=42.0 min=Just 42.0 max=Just 42.0 buckets=[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0] bounds=[0.0,5.0,10.0,25.0,50.0,75.0,100.0,250.0,500.0,750.0,1000.0,2500.0,5000.0,7500.0,10000.0]
+metric=sum name="pressure_level" unit="1" monotonic=False temporality=CumulativeTemporality
+  point attrs=[] ts=<ts> value=-1.5
+metric=sum name="queue_depth" unit="1" monotonic=False temporality=CumulativeTemporality
+  point attrs=[queue="jobs"] ts=<ts> value=-2.0
+metric=sum name="requests_total" unit="1" monotonic=True temporality=CumulativeTemporality
+  point attrs=[route="/"] ts=<ts> value=3.0
+metric=sum name="workers_total" unit="1" monotonic=True temporality=CumulativeTemporality
+  point attrs=[] ts=<ts> value=7.0

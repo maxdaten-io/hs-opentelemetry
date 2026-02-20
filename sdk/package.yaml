@@ -8,6 +8,7 @@ version:             0.1.0.1
 extra-source-files:
 - README.md
 - ChangeLog.md
+- .golden/all-signals-snapshot/golden
 extra-doc-files:
 - docs/img/*
 
@@ -58,6 +59,7 @@ library:
     - OpenTelemetry.Context.ThreadLocal
     - OpenTelemetry.Exporter.Span
     - OpenTelemetry.Exporter.LogRecord
+    - OpenTelemetry.Exporter.Metric
     - OpenTelemetry.Exporter
     - OpenTelemetry.Processor.Span
     - OpenTelemetry.Processor.LogRecord
@@ -98,6 +100,13 @@ tests:
     - clock
     - hs-opentelemetry-api
     - hs-opentelemetry-sdk
+    - hs-opentelemetry-exporter-otlp
+    - hs-opentelemetry-exporter-in-memory
+    - hs-opentelemetry-exporter-otlp ^>= 0.1
+    - hs-opentelemetry-otlp
     - hspec
+    - hspec-golden
+    - microlens
     - text
     - unordered-containers
+    - vector
