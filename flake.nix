@@ -97,6 +97,24 @@
                 openssl
                 pcre
                 postgresql
+                # postgresql-libpq's Setup.hs still requires a pg_config binary.
+                (writeShellScriptBin "pg_config" ''
+                  case "''${1:-}" in
+                    --includedir)
+                      printf '%s\n' "${postgresql.dev}/include"
+                      ;;
+                    --libdir)
+                      printf '%s\n' "${postgresql.lib}/lib"
+                      ;;
+                    --version)
+                      printf '%s\n' "${postgresql.version}"
+                      ;;
+                    *)
+                      printf '%s\n' "Unsupported pg_config option: ''${1:-<none>}" >&2
+                      exit 1
+                      ;;
+                  esac
+                '')
                 protobuf
                 shellcheck
                 zlib
