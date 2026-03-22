@@ -1,3 +1,6 @@
 [submodule "semantic-conventions/model"]
 	path = semantic-conventions/model
 	url = https://github.com/open-telemetry/semantic-conventions/
+[submodule "specification"]
+	path = specification
+	url = https://github.com/open-telemetry/opentelemetry-specification.git
