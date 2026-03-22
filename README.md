@@ -16,12 +16,10 @@ for the Haskell programming language.
 
 ## Implementation Status
 
-This library still has a number of areas that don't fully cover
-the breadth of the OpenTelemetry specification. The core aspects of the tracing
-system are implemented, but you may view the detailed conformance [checklist
-here](spec-compliance.md)
-
-Metrics and logs are not yet supported.
+This library still has areas that do not fully cover the breadth of the
+OpenTelemetry specification. Tracing is mature, and logs and metrics are
+implemented with OTLP HTTP/protobuf export support. You can view the current
+conformance [checklist here](spec-compliance.md).
 
 ## Usage
 
@@ -52,12 +50,14 @@ Fully instrumented application examples are available in the [examples](examples
 
 ## Provided Exporters
 
-| Exporter  | OpenTelemetry Package                            | Module                       | Support            |
-|-----------|--------------------------------------------------|------------------------------|--------------------|
-| OTLP      | [hs-opentelemetry-exporter-otlp](exporters/otlp) | OpenTelemetry.SpanExporter.OTLP  | :white_check_mark: |
-| Jaeger    |                                                  |                              | Not Implemented.   |
-| Zipkin    |                                                  |                              | Not Implemented    |
-| Honeycomb | (use hs-opentelemetry-exporter-otlp)             |                              | :white_check_mark: |
+| Exporter  | OpenTelemetry Package                            | Module                                | Support            |
+|-----------|--------------------------------------------------|---------------------------------------|--------------------|
+| OTLP Span | [hs-opentelemetry-exporter-otlp](exporters/otlp) | OpenTelemetry.Exporter.OTLP.Span      | :white_check_mark: |
+| OTLP Log  | [hs-opentelemetry-exporter-otlp](exporters/otlp) | OpenTelemetry.Exporter.OTLP.LogRecord | :white_check_mark: |
+| OTLP Metric | [hs-opentelemetry-exporter-otlp](exporters/otlp) | OpenTelemetry.Exporter.OTLP.Metric    | :white_check_mark: |
+| Jaeger    |                                                  |                                       | Not Implemented.   |
+| Zipkin    |                                                  |                                       | Not Implemented    |
+| Honeycomb | (use hs-opentelemetry-exporter-otlp)             |                                       | :white_check_mark: |
 
 ## Provided Propagators
 

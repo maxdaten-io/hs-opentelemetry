@@ -48,7 +48,7 @@ addAttribute AttributeLimits {..} LogAttributes {..} !k !v = case attributeCount
       then LogAttributes attributes attributesCount (attributesDropped + 1)
       else LogAttributes newAttrs newCount attributesDropped
   where
-    newAttrs = H.insert k (maybe id limitLengths attributeCountLimit $ toValue v) attributes
+    newAttrs = H.insert k (maybe id limitLengths attributeLengthLimit $ toValue v) attributes
     newCount = H.size newAttrs
 {-# INLINE addAttribute #-}
 
@@ -61,7 +61,7 @@ addAttributes AttributeLimits {..} LogAttributes {..} attrs = case attributeCoun
       then LogAttributes attributes attributesCount (attributesDropped + H.size attrs)
       else LogAttributes newAttrs newCount attributesDropped
   where
-    newAttrs = H.union attributes $ H.map toValue attrs
+    newAttrs = H.union attributes $ H.map (maybe id limitLengths attributeLengthLimit . toValue) attrs
     newCount = H.size newAttrs
 {-# INLINE addAttributes #-}
 
